@@ -1,0 +1,1712 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BareTrack</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@400;500;600;700&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #1a1612;
+    background-image:
+      radial-gradient(ellipse at 20% 0%, rgba(180,140,60,0.06) 0%, transparent 60%),
+      radial-gradient(ellipse at 80% 100%, rgba(120,80,30,0.05) 0%, transparent 60%);
+    color: #d4c8b0;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 40px 20px;
+  }
+
+  #app { width: 100%; max-width: 800px; transition: max-width 0.3s; }
+  #app.wide { max-width: 1000px; }
+
+  .header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .logo {
+    width: 180px;
+    height: auto;
+    margin-bottom: 16px;
+    filter: drop-shadow(0 4px 12px rgba(0,0,0,0.4));
+  }
+  h1 {
+    text-align: center;
+    font-family: 'Playfair Display', Georgia, serif;
+    font-size: 2rem;
+    margin-bottom: 8px;
+    color: #e8d5a3;
+    letter-spacing: 0.02em;
+  }
+  .subtitle {
+    text-align: center;
+    color: #8a7e6b;
+    margin-bottom: 24px;
+    font-size: 0.95rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+
+  /* --- Nav --- */
+  .nav {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 24px;
+  }
+  .nav-btn {
+    padding: 8px 24px;
+    border-radius: 20px;
+    border: 1px solid #4a3f2f;
+    background: transparent;
+    color: #8a7e6b;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    letter-spacing: 0.03em;
+  }
+  .nav-btn.active { background: #b48c3c; border-color: #b48c3c; color: #1a1612; }
+  .nav-btn:hover:not(.active) { border-color: #b48c3c; color: #d4c8b0; }
+
+  /* --- Card --- */
+  .card {
+    background: #231e18;
+    border-radius: 16px;
+    padding: 32px;
+    border: 1px solid #3a3226;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.03);
+  }
+
+  .input-row {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  input[type="text"] {
+    flex: 1;
+    padding: 12px 16px;
+    border-radius: 10px;
+    border: 1px solid #4a3f2f;
+    background: #1a1612;
+    color: #e8d5a3;
+    font-size: 1rem;
+    outline: none;
+    transition: border-color 0.2s;
+    font-family: inherit;
+  }
+  input[type="text"]::placeholder { color: #6b6050; }
+  input[type="text"]:focus { border-color: #b48c3c; box-shadow: 0 0 0 2px rgba(180,140,60,0.15); }
+
+  button {
+    padding: 12px 24px;
+    border-radius: 10px;
+    border: none;
+    font-size: 1rem;
+    cursor: pointer;
+    font-weight: 600;
+    font-family: inherit;
+    transition: background 0.2s, transform 0.1s;
+  }
+  button:active { transform: scale(0.97); }
+
+  .btn-primary { background: #b48c3c; color: #1a1612; }
+  .btn-primary:hover { background: #c99d48; }
+  .btn-primary:disabled { background: #4a3f2f; color: #6b6050; cursor: not-allowed; }
+
+  .btn-secondary { background: #3a3226; color: #d4c8b0; }
+  .btn-secondary:hover { background: #4a3f2f; }
+
+  .btn-download {
+    background: linear-gradient(135deg, #b48c3c, #8a6a20);
+    color: #1a1612;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    text-decoration: none;
+    padding: 10px 20px;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    transition: opacity 0.2s;
+  }
+  .btn-download:hover { opacity: 0.9; }
+
+  /* --- Progress State --- */
+  .overall-bar-container { margin-bottom: 24px; }
+  .overall-label {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 6px;
+    font-size: 0.9rem;
+    color: #8a7e6b;
+  }
+  .overall-bar {
+    height: 8px;
+    background: #2e2720;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .overall-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #8a6a20, #c99d48, #e8d5a3);
+    border-radius: 4px;
+    transition: width 0.5s ease;
+    width: 0%;
+  }
+
+  .steps { display: flex; flex-direction: column; gap: 12px; }
+
+  .step {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 16px;
+    background: #1a1612;
+    border-radius: 10px;
+    border: 1px solid #3a3226;
+  }
+
+  .step-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.85rem;
+    flex-shrink: 0;
+    border: 2px solid #4a3f2f;
+    color: #6b6050;
+    background: transparent;
+  }
+  .step.done .step-icon { background: #7a8a3c; border-color: #7a8a3c; color: #1a1612; }
+  .step.active .step-icon { background: #b48c3c; border-color: #b48c3c; color: #1a1612; animation: pulse 1.5s infinite; }
+
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(180,140,60,0.35); }
+    50% { box-shadow: 0 0 0 8px rgba(180,140,60,0); }
+  }
+
+  .step-body { flex: 1; min-width: 0; }
+  .step-title { font-weight: 600; font-size: 0.95rem; margin-bottom: 4px; color: #d4c8b0; }
+  .step.pending .step-title { color: #6b6050; }
+
+  .step-bar {
+    height: 4px;
+    background: #2e2720;
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 4px;
+  }
+  .step-bar-fill {
+    height: 100%;
+    background: #b48c3c;
+    border-radius: 2px;
+    transition: width 0.5s ease;
+  }
+  .step.done .step-bar-fill { background: #7a8a3c; }
+
+  .step-time { font-size: 0.8rem; color: #8a7e6b; }
+
+  /* --- Two-column processing layout --- */
+  .processing-columns {
+    display: grid;
+    grid-template-columns: 1fr 260px;
+    gap: 20px;
+    align-items: start;
+  }
+  @media (max-width: 700px) {
+    .processing-columns { grid-template-columns: 1fr; }
+  }
+  .processing-left { min-width: 0; }
+  .processing-right {
+    background: #1a1612;
+    border: 1px solid #3a3226;
+    border-radius: 12px;
+    padding: 16px;
+    position: sticky;
+    top: 20px;
+  }
+  .output-heading {
+    font-family: 'Playfair Display', Georgia, serif;
+    font-size: 1rem;
+    color: #e8d5a3;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #3a3226;
+  }
+  .output-files {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .output-placeholder {
+    color: #6b6050;
+    font-size: 0.85rem;
+    font-style: italic;
+  }
+  .output-file {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: #231e18;
+    border: 1px solid #3a3226;
+    border-radius: 8px;
+    text-decoration: none;
+    color: #d4c8b0;
+    font-size: 0.85rem;
+    transition: border-color 0.2s, background 0.2s;
+  }
+  .output-file:hover {
+    border-color: #b48c3c;
+    background: rgba(180,140,60,0.08);
+  }
+  .output-file-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: #2e2720;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.7rem;
+    color: #b48c3c;
+    font-weight: 700;
+    flex-shrink: 0;
+    text-transform: uppercase;
+  }
+  .output-file-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .output-file-step {
+    font-size: 0.7rem;
+    color: #6b6050;
+    white-space: nowrap;
+  }
+
+  .close-note {
+    text-align: center;
+    margin-top: 20px;
+    color: #6b6050;
+    font-size: 0.85rem;
+    font-style: italic;
+  }
+
+  /* --- Done State: Media Player --- */
+  .player-title {
+    text-align: center;
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: #e8d5a3;
+    margin-bottom: 16px;
+  }
+  .tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 16px;
+  }
+  .tab {
+    flex: 1;
+    padding: 10px;
+    text-align: center;
+    background: #1a1612;
+    border: 1px solid #3a3226;
+    border-radius: 10px 10px 0 0;
+    cursor: pointer;
+    color: #8a7e6b;
+    font-weight: 600;
+    font-size: 0.9rem;
+    transition: background 0.2s, color 0.2s;
+  }
+  .tab.active { background: #231e18; color: #e8d5a3; border-bottom-color: #231e18; }
+  .tab:hover { color: #d4c8b0; }
+  .tab-icon {
+    width: 16px;
+    height: 16px;
+    vertical-align: -2px;
+    margin-right: 6px;
+    display: inline-block;
+  }
+
+  .player-area {
+    background: #231e18;
+    border: 1px solid #3a3226;
+    border-top: none;
+    border-radius: 0 0 14px 14px;
+    padding: 20px;
+  }
+
+  video, audio { width: 100%; border-radius: 10px; outline: none; }
+  video { background: #0e0c09; }
+  audio { margin: 20px 0; }
+
+  /* --- Video container with vocal toggle --- */
+  .video-container { position: relative; }
+  .vocal-toggle {
+    position: absolute;
+    bottom: 56px;
+    right: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(26,22,18,0.85);
+    backdrop-filter: blur(6px);
+    padding: 6px 12px;
+    border-radius: 20px;
+    border: 1px solid rgba(74,63,47,0.6);
+    z-index: 10;
+  }
+  .toggle-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #d4c8b0;
+  }
+  .toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 36px;
+    height: 20px;
+    cursor: pointer;
+  }
+  .toggle-switch input { opacity: 0; width: 0; height: 0; }
+  .toggle-slider {
+    position: absolute;
+    inset: 0;
+    background: #3a3226;
+    border-radius: 20px;
+    transition: background 0.25s;
+  }
+  .toggle-slider::before {
+    content: '';
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    left: 3px;
+    bottom: 3px;
+    background: #8a7e6b;
+    border-radius: 50%;
+    transition: transform 0.25s, background 0.25s;
+  }
+  .toggle-switch input:checked + .toggle-slider { background: #b48c3c; }
+  .toggle-switch input:checked + .toggle-slider::before {
+    transform: translateX(16px);
+    background: #1a1612;
+  }
+
+  /* --- Lyrics Panel --- */
+  .lyrics-panel {
+    margin-top: 16px;
+    background: #1a1612;
+    border: 1px solid #3a3226;
+    border-radius: 12px;
+    padding: 20px;
+    max-height: 300px;
+    overflow-y: auto;
+    scroll-behavior: smooth;
+    text-align: center;
+    line-height: 2.2;
+  }
+
+  .lyrics-line { margin-bottom: 4px; transition: opacity 0.3s; }
+  .lyrics-line.past { opacity: 0.35; }
+
+  .lyrics-word {
+    display: inline;
+    padding: 2px 5px;
+    border-radius: 4px;
+    transition: color 0.15s, background 0.15s;
+    font-size: 1.1rem;
+    color: #d4c8b0;
+  }
+  .lyrics-word.active {
+    color: #ffd700;
+    background: rgba(180,140,60,0.2);
+    font-weight: 700;
+  }
+  .lyrics-word.sung { color: #6b6050; }
+
+  /* --- Downloads --- */
+  .downloads {
+    display: flex;
+    gap: 12px;
+    margin-top: 20px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  /* --- Library --- */
+  .library-layout {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 20px;
+    align-items: start;
+  }
+  @media (max-width: 700px) {
+    .library-layout { grid-template-columns: 1fr; }
+  }
+
+  .library-sidebar {
+    background: #231e18;
+    border: 1px solid #3a3226;
+    border-radius: 12px;
+    padding: 16px;
+    position: sticky;
+    top: 20px;
+  }
+  .filter-section { margin-bottom: 16px; }
+  .filter-section:last-child { margin-bottom: 0; }
+  .filter-heading {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #8a7e6b;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 8px;
+  }
+  .filter-search {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px solid #3a3226;
+    background: #1a1612;
+    color: #d4c8b0;
+    font-size: 0.85rem;
+    font-family: inherit;
+    outline: none;
+  }
+  .filter-search::placeholder { color: #6b6050; }
+  .filter-search:focus { border-color: #b48c3c; }
+  .filter-options {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 180px;
+    overflow-y: auto;
+  }
+  .filter-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: #d4c8b0;
+    transition: background 0.15s;
+  }
+  .filter-option:hover { background: rgba(180,140,60,0.08); }
+  .filter-option.active { background: rgba(180,140,60,0.15); color: #e8d5a3; }
+  .filter-option input[type="checkbox"] { display: none; }
+  .filter-check {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    border: 1px solid #4a3f2f;
+    background: #1a1612;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .filter-option.active .filter-check {
+    background: #b48c3c;
+    border-color: #b48c3c;
+  }
+  .filter-option.active .filter-check::after {
+    content: '';
+    width: 6px;
+    height: 6px;
+    background: #1a1612;
+    border-radius: 1px;
+  }
+  .filter-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .filter-count {
+    font-size: 0.75rem;
+    color: #6b6050;
+    flex-shrink: 0;
+  }
+  .filter-clear {
+    font-size: 0.75rem;
+    color: #b48c3c;
+    cursor: pointer;
+    text-decoration: none;
+    margin-top: 8px;
+    display: inline-block;
+  }
+  .filter-clear:hover { text-decoration: underline; }
+
+  .library-main {}
+  .library-results-count {
+    font-size: 0.85rem;
+    color: #8a7e6b;
+    margin-bottom: 12px;
+  }
+  .library-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 16px;
+  }
+
+  .library-item {
+    background: #231e18;
+    border: 1px solid #3a3226;
+    border-radius: 14px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: border-color 0.2s, transform 0.15s, box-shadow 0.2s;
+  }
+  .library-item:hover {
+    border-color: #b48c3c;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+  }
+
+  .library-thumb {
+    width: 100%;
+    aspect-ratio: 16/9;
+    object-fit: cover;
+    background: #1a1612;
+    display: block;
+  }
+
+  .library-info {
+    padding: 12px;
+  }
+  .library-info h3 {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #e8d5a3;
+    margin-bottom: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  .library-info .meta {
+    font-size: 0.8rem;
+    color: #6b6050;
+  }
+  .library-info .channel {
+    font-size: 0.8rem;
+    color: #8a7e6b;
+    margin-bottom: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .library-empty {
+    text-align: center;
+    color: #6b6050;
+    padding: 40px 20px;
+    font-size: 0.95rem;
+  }
+
+  /* --- Error State --- */
+  .error-box {
+    background: #2e1a14;
+    border: 1px solid #5a3020;
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .error-box p { color: #e07050; }
+
+  /* --- Scrollbar --- */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #4a3f2f; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #6b6050; }
+
+  /* --- Tab download link --- */
+  .tab-download {
+    text-align: center;
+    margin-top: 12px;
+  }
+  .btn-download-sm {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #b48c3c;
+    text-decoration: none;
+    font-size: 0.85rem;
+    font-weight: 600;
+    padding: 6px 16px;
+    border: 1px solid #4a3f2f;
+    border-radius: 8px;
+    transition: background 0.2s, border-color 0.2s;
+  }
+  .btn-download-sm:hover {
+    background: rgba(180,140,60,0.12);
+    border-color: #b48c3c;
+  }
+  .btn-download-sm svg { stroke: #b48c3c; }
+
+  /* --- Inline player --- */
+  .inline-player { margin-top: 24px; }
+  .inline-player-divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, #4a3f2f, transparent);
+    margin-bottom: 20px;
+  }
+
+  /* --- Lyrics Popup --- */
+  .lyrics-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 8, 5, 0.8);
+    backdrop-filter: blur(4px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    padding: 20px;
+  }
+  .lyrics-popup {
+    background: #231e18;
+    border: 1px solid #4a3f2f;
+    border-radius: 16px;
+    width: 100%;
+    max-width: 560px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+  }
+  .lyrics-popup-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 24px 16px;
+    border-bottom: 1px solid #3a3226;
+  }
+  .lyrics-popup-header h2 {
+    font-family: 'Playfair Display', Georgia, serif;
+    font-size: 1.3rem;
+    color: #e8d5a3;
+  }
+  .lyrics-popup-close {
+    background: none;
+    border: none;
+    color: #8a7e6b;
+    font-size: 1.6rem;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+    transition: color 0.2s;
+  }
+  .lyrics-popup-close:hover { color: #e8d5a3; }
+  .lyrics-popup-body {
+    padding: 24px;
+    overflow-y: auto;
+    text-align: center;
+    line-height: 2;
+  }
+  .lyrics-popup-line {
+    color: #d4c8b0;
+    font-size: 1.05rem;
+    margin-bottom: 4px;
+  }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="header">
+    <img src="/static/logo.png" alt="BareTrack" class="logo" />
+    <p class="subtitle">Strip. Sing. Share.</p>
+  </div>
+
+  <!-- NAV -->
+  <div class="nav">
+    <button class="nav-btn active" data-page="generator" onclick="showPage('generator')">Production</button>
+    <button class="nav-btn" data-page="library" onclick="showPage('library')">Library</button>
+  </div>
+
+  <!-- === GENERATOR PAGE === -->
+  <div id="page-generator">
+
+    <!-- IDLE STATE -->
+    <div id="state-idle" class="card">
+      <div class="input-row">
+        <input type="text" id="url-input" placeholder="https://www.youtube.com/watch?v=..." />
+        <button class="btn-primary" id="btn-submit" onclick="submitJob()">Generate</button>
+      </div>
+    </div>
+
+    <!-- PROCESSING STATE -->
+    <div id="state-processing" class="card hidden">
+      <div id="processing-title" class="player-title" style="margin-bottom:20px;"></div>
+      <div class="overall-bar-container">
+        <div class="overall-label">
+          <span>Overall progress</span>
+          <span id="overall-eta"></span>
+        </div>
+        <div class="overall-bar">
+          <div class="overall-bar-fill" id="overall-fill"></div>
+        </div>
+      </div>
+      <div class="processing-columns">
+        <div class="processing-left">
+          <div class="steps" id="steps-container"></div>
+        </div>
+        <div class="processing-right">
+          <h3 class="output-heading">Output Files</h3>
+          <div id="output-files" class="output-files">
+            <p class="output-placeholder">Files will appear here as each step completes.</p>
+          </div>
+        </div>
+      </div>
+      <p class="close-note" id="close-note">You can close this page — processing will continue in the background.</p>
+
+      <!-- Inline player (revealed when job completes) -->
+      <div id="inline-player" class="inline-player hidden">
+        <div class="inline-player-divider"></div>
+        <div class="tabs" id="tabs"></div>
+        <div class="player-area" id="player-area"></div>
+        <div class="lyrics-panel" id="lyrics-panel"></div>
+        <div style="text-align:center; margin-top:16px;">
+          <button class="btn-secondary" onclick="startNew()">Generate New</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- DONE STATE (kept for direct library navigation) -->
+    <div id="state-done" class="card hidden">
+      <div class="player-title" id="done-title"></div>
+      <div class="tabs" id="tabs-standalone"></div>
+      <div class="player-area" id="player-area-standalone"></div>
+      <div class="lyrics-panel" id="lyrics-panel-standalone"></div>
+      <div style="text-align:center; margin-top:16px;">
+        <button class="btn-secondary" onclick="startNew()">Generate New</button>
+      </div>
+    </div>
+
+    <!-- ERROR STATE -->
+    <div id="state-error" class="card hidden">
+      <div class="error-box">
+        <p id="error-msg"></p>
+      </div>
+      <div style="text-align:center; display:flex; gap:12px; justify-content:center;">
+        <button class="btn-primary" id="btn-resume" onclick="resumeJob()">Resume</button>
+        <button class="btn-secondary" onclick="startNew()">Start Over</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- === LIBRARY PAGE === -->
+  <div id="page-library" class="hidden">
+    <div class="library-layout">
+      <div class="library-sidebar" id="library-sidebar"></div>
+      <div class="library-main" id="library-main"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Lyrics Popup Overlay -->
+<div id="lyrics-overlay" class="lyrics-overlay hidden" onclick="if(event.target===this)closeLyricsPopup()">
+  <div class="lyrics-popup">
+    <div class="lyrics-popup-header">
+      <h2>Lyrics</h2>
+      <button class="lyrics-popup-close" onclick="closeLyricsPopup()">&times;</button>
+    </div>
+    <div class="lyrics-popup-body" id="lyrics-popup-body"></div>
+  </div>
+</div>
+
+<script>
+const STEP_NAMES = ['Downloading', 'Separating vocals', 'Transcribing lyrics', 'Building subtitles', 'Composing video'];
+let pollInterval = null;
+let currentJob = null;
+let lyricsData = null;
+let activeMediaEl = null;
+let currentPage = 'generator';
+
+// ---- Page navigation ----
+
+function stopAllMedia() {
+  if (activeMediaEl) {
+    activeMediaEl.pause();
+    activeMediaEl.removeEventListener('timeupdate', onTimeUpdate);
+    activeMediaEl.removeEventListener('play', onMediaPlay);
+    activeMediaEl.removeEventListener('pause', onMediaPause);
+    activeMediaEl.removeEventListener('seeked', onMediaSeeked);
+    activeMediaEl.src = '';
+    activeMediaEl = null;
+  }
+  if (typeof destroyVocalsSync === 'function') destroyVocalsSync();
+}
+
+function showPage(page) {
+  stopAllMedia();
+  currentPage = page;
+  document.querySelectorAll('.nav-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.page === page);
+  });
+  document.getElementById('page-generator').classList.toggle('hidden', page !== 'generator');
+  document.getElementById('page-library').classList.toggle('hidden', page !== 'library');
+  document.getElementById('app').classList.toggle('wide', page === 'library');
+
+  if (page === 'library') loadLibrary();
+}
+
+// ---- State management ----
+
+function showState(state) {
+  stopAllMedia();
+  ['idle', 'processing', 'done', 'error'].forEach(s => {
+    document.getElementById('state-' + s).classList.toggle('hidden', s !== state);
+  });
+  document.getElementById('app').classList.toggle('wide',
+    state === 'processing' || currentPage === 'library');
+}
+
+function startNew() {
+  stopAllMedia();
+  currentJob = null;
+  lyricsData = null;
+  // Reset inline player
+  document.getElementById('inline-player').classList.add('hidden');
+  document.getElementById('close-note').classList.remove('hidden');
+  document.getElementById('url-input').value = '';
+  showState('idle');
+}
+
+// ---- Submit Job ----
+
+async function submitJob() {
+  const url = document.getElementById('url-input').value.trim();
+  if (!url) return;
+  if (!/youtube\.com\/watch|youtu\.be\//.test(url)) {
+    alert('Please enter a valid YouTube URL');
+    return;
+  }
+
+  const btn = document.getElementById('btn-submit');
+  btn.disabled = true;
+  btn.textContent = 'Submitting...';
+
+  try {
+    const resp = await fetch('/api/jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    if (resp.status === 409) {
+      alert('A job is already running. Please wait for it to finish.');
+      return;
+    }
+    if (!resp.ok) throw new Error('Failed to start job');
+    const data = await resp.json();
+    currentJob = data.job;
+    showProcessing();
+  } catch (e) {
+    alert('Error: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Generate';
+  }
+}
+
+// ---- Processing State ----
+
+function showProcessing() {
+  showState('processing');
+  const titleEl = document.getElementById('processing-title');
+  titleEl.textContent = currentJob.title || 'Processing...';
+  renderSteps();
+  if (pollInterval) clearInterval(pollInterval);
+  pollInterval = setInterval(pollJob, 2000);
+  pollJob();
+}
+
+function renderSteps() {
+  const container = document.getElementById('steps-container');
+  container.innerHTML = STEP_NAMES.map((name, i) => `
+    <div class="step pending" id="step-${i}">
+      <div class="step-icon">${i + 1}</div>
+      <div class="step-body">
+        <div class="step-title">${name}</div>
+        <div class="step-bar"><div class="step-bar-fill" style="width:0%"></div></div>
+        <div class="step-time"></div>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function pollJob() {
+  try {
+    const resp = await fetch('/api/jobs/current');
+    const data = await resp.json();
+    if (!data.job) return;
+    currentJob = data.job;
+
+    // Update title if it arrived
+    const titleEl = document.getElementById('processing-title');
+    if (currentJob.title && titleEl) titleEl.textContent = currentJob.title;
+
+    if (currentJob.status === 'done') {
+      clearInterval(pollInterval);
+      pollInterval = null;
+      updateProgress(); // final update to show step 5 as done
+      showInlinePlayer(currentJob.id);
+      return;
+    }
+    if (currentJob.status === 'failed') {
+      clearInterval(pollInterval);
+      pollInterval = null;
+      showError(currentJob.error || 'Unknown error');
+      return;
+    }
+
+    updateProgress();
+  } catch (e) {
+    // Silently retry on next interval
+  }
+}
+
+function updateProgress() {
+  const job = currentJob;
+  const now = Date.now();
+
+  for (let i = 0; i < 5; i++) {
+    const el = document.getElementById('step-' + i);
+    const stepNum = i + 1;
+    const barFill = el.querySelector('.step-bar-fill');
+    const timeEl = el.querySelector('.step-time');
+
+    el.className = 'step';
+    if (stepNum < job.step || (job.status === 'done' && stepNum <= job.step)) {
+      el.classList.add('done');
+      barFill.style.width = '100%';
+      timeEl.textContent = 'Done';
+    } else if (stepNum === job.step) {
+      el.classList.add('active');
+      const pct = Math.round((job.step_progress || 0) * 100);
+      barFill.style.width = pct + '%';
+
+      const stepStarted = new Date(job.step_started_at).getTime();
+      const stepElapsed = (now - stepStarted) / 1000;
+      const stepEst = job.step_estimates ? job.step_estimates[i] : null;
+
+      let timeText = formatDuration(stepElapsed);
+      if (stepEst && stepEst > 1) {
+        timeText += ' / ~' + formatDuration(stepEst) + ' est.';
+      }
+      timeEl.textContent = timeText;
+    } else {
+      el.classList.add('pending');
+      barFill.style.width = '0%';
+      if (job.step_estimates && job.step_estimates[i] > 1) {
+        timeEl.textContent = '~' + formatDuration(job.step_estimates[i]) + ' est.';
+      } else {
+        timeEl.textContent = '';
+      }
+    }
+  }
+
+  // Overall progress bar
+  let overallPct = 0;
+  let remainingEst = 0;
+  const etaEl = document.getElementById('overall-eta');
+
+  if (job.status === 'done') {
+    overallPct = 100;
+    etaEl.textContent = 'Complete';
+  } else if (job.step_estimates && job.estimated_total > 0) {
+    let completedTime = 0;
+    for (let i = 0; i < job.step - 1; i++) {
+      completedTime += job.step_estimates[i];
+    }
+    const currentStepEst = job.step_estimates[job.step - 1] || 0;
+    completedTime += currentStepEst * (job.step_progress || 0);
+    overallPct = Math.min((completedTime / job.estimated_total) * 100, 99);
+    remainingEst = job.estimated_total - completedTime;
+    if (remainingEst > 5) {
+      etaEl.textContent = '~' + formatDuration(remainingEst) + ' remaining';
+    } else {
+      etaEl.textContent = 'Almost done...';
+    }
+  } else {
+    overallPct = ((job.step - 1) / 5) * 100;
+    etaEl.textContent = 'Estimating...';
+  }
+
+  document.getElementById('overall-fill').style.width = overallPct + '%';
+
+  // Update output files panel
+  renderOutputFiles(job);
+}
+
+const HIDDEN_FILES = new Set(['wav', 'ass']);
+
+function renderOutputFiles(job) {
+  const container = document.getElementById('output-files');
+  if (!job.artifacts || Object.keys(job.artifacts).length === 0) {
+    container.innerHTML = '<p class="output-placeholder">Files will appear here as each step completes.</p>';
+    return;
+  }
+
+  const files = [];
+  let hasLyrics = false;
+  for (const [step, arts] of Object.entries(job.artifacts)) {
+    for (const a of arts) {
+      const ext = a.name.split('.').pop().toLowerCase();
+      if (HIDDEN_FILES.has(ext)) continue;
+      if (a.name === 'lyrics.json') { hasLyrics = true; continue; }
+      files.push({ ...a, step: parseInt(step), ext });
+    }
+  }
+
+  if (files.length === 0 && !hasLyrics) {
+    container.innerHTML = '<p class="output-placeholder">Files will appear here as each step completes.</p>';
+    return;
+  }
+
+  let html = files.map(f => `
+    <a class="output-file" href="/api/jobs/${job.id}/artifact/${f.path}" title="Download ${f.name}">
+      <div class="output-file-icon">${f.ext}</div>
+      <span class="output-file-name">${f.name}</span>
+      <span class="output-file-step">Step ${f.step}</span>
+    </a>
+  `).join('');
+
+  if (hasLyrics) {
+    html += `
+      <a class="output-file" href="#" onclick="showLyricsPopup('${job.id}'); return false;" title="View lyrics">
+        <div class="output-file-icon" style="background:#3a2e20; color:#e8d5a3;">Aa</div>
+        <span class="output-file-name">Lyrics</span>
+        <span class="output-file-step">Step 3</span>
+      </a>
+    `;
+  }
+
+  container.innerHTML = html;
+}
+
+async function showLyricsPopup(jobId) {
+  const overlay = document.getElementById('lyrics-overlay');
+  const body = document.getElementById('lyrics-popup-body');
+  body.innerHTML = '<p style="color:#8a7e6b;">Loading...</p>';
+  overlay.classList.remove('hidden');
+
+  try {
+    const resp = await fetch(`/api/jobs/${jobId}/lyrics`);
+    const words = await resp.json();
+    if (!words || words.length === 0) {
+      body.innerHTML = '<p style="color:#8a7e6b;">No lyrics found.</p>';
+      return;
+    }
+    // Group into lines of ~8 words
+    const lines = [];
+    for (let i = 0; i < words.length; i += 8) {
+      lines.push(words.slice(i, i + 8).map(w => w.text).join(' '));
+    }
+    body.innerHTML = lines.map(l => `<p class="lyrics-popup-line">${escapeHtml(l)}</p>`).join('');
+  } catch (e) {
+    body.innerHTML = '<p style="color:#e07050;">Failed to load lyrics.</p>';
+  }
+}
+
+function closeLyricsPopup() {
+  document.getElementById('lyrics-overlay').classList.add('hidden');
+}
+
+function formatDuration(secs) {
+  secs = Math.round(secs);
+  if (secs < 60) return secs + 's';
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  if (m < 60) return m + 'm ' + (s > 0 ? s + 's' : '');
+  const h = Math.floor(m / 60);
+  return h + 'h ' + (m % 60) + 'm';
+}
+
+// ---- Error State ----
+
+function showError(msg) {
+  document.getElementById('error-msg').textContent = msg;
+  // Show resume button only if we have a job to resume
+  const resumeBtn = document.getElementById('btn-resume');
+  resumeBtn.style.display = (currentJob && currentJob.id) ? '' : 'none';
+  showState('error');
+}
+
+async function resumeJob() {
+  if (!currentJob || !currentJob.id) return;
+
+  const btn = document.getElementById('btn-resume');
+  btn.disabled = true;
+  btn.textContent = 'Resuming...';
+
+  try {
+    const resp = await fetch(`/api/jobs/${currentJob.id}/resume`, { method: 'POST' });
+    if (resp.status === 409) {
+      alert('A job is already running.');
+      return;
+    }
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      throw new Error(data.detail || 'Failed to resume');
+    }
+    const data = await resp.json();
+    currentJob = data.job;
+    showProcessing();
+  } catch (e) {
+    alert('Error: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Resume';
+  }
+}
+
+// ---- Done State: Media Player ----
+
+// Track which DOM container set the player is using
+let playerMode = 'inline'; // 'inline' or 'standalone'
+
+function _tabsEl() {
+  return document.getElementById(playerMode === 'inline' ? 'tabs' : 'tabs-standalone');
+}
+function _playerAreaEl() {
+  return document.getElementById(playerMode === 'inline' ? 'player-area' : 'player-area-standalone');
+}
+function _lyricsPanelEl() {
+  return document.getElementById(playerMode === 'inline' ? 'lyrics-panel' : 'lyrics-panel-standalone');
+}
+
+async function showInlinePlayer(jobId) {
+  playerMode = 'inline';
+
+  // Hide the close note, show the player section
+  document.getElementById('close-note').classList.add('hidden');
+  document.getElementById('inline-player').classList.remove('hidden');
+
+  // Load lyrics
+  try {
+    const resp = await fetch(`/api/jobs/${jobId}/lyrics`);
+    lyricsData = await resp.json();
+  } catch (e) {
+    lyricsData = [];
+  }
+
+  renderTabs(jobId);
+  switchTab('video', jobId);
+}
+
+async function showPlayerForJob(jobId) {
+  playerMode = 'standalone';
+
+  // Load job info if we don't have it or it's a different job
+  if (!currentJob || currentJob.id !== jobId) {
+    const resp = await fetch('/api/jobs/current');
+    const data = await resp.json();
+    if (data.job && data.job.id === jobId) {
+      currentJob = data.job;
+    } else {
+      const libResp = await fetch('/api/library');
+      const libData = await libResp.json();
+      const item = libData.items.find(i => i.id === jobId);
+      if (item) {
+        currentJob = { id: item.id, title: item.title, status: 'done' };
+      } else {
+        currentJob = { id: jobId, title: 'Unknown', status: 'done' };
+      }
+    }
+  }
+
+  showPage('generator');
+  showState('done');
+
+  document.getElementById('done-title').textContent = currentJob.title || 'Karaoke';
+
+  try {
+    const resp = await fetch(`/api/jobs/${jobId}/lyrics`);
+    lyricsData = await resp.json();
+  } catch (e) {
+    lyricsData = [];
+  }
+
+  renderTabs(jobId);
+  switchTab('video', jobId);
+}
+
+async function showPlayer() {
+  if (currentJob && currentJob.id) {
+    await showPlayerForJob(currentJob.id);
+  }
+}
+
+function renderTabs(jobId) {
+  const id = jobId || currentJob.id;
+  _tabsEl().innerHTML = `
+    <div class="tab active" data-tab="video" onclick="switchTab('video','${id}')">
+      <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+      Karaoke Video
+    </div>
+    <div class="tab" data-tab="instrumental" onclick="switchTab('instrumental','${id}')">
+      <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+      Instrumental
+    </div>
+    <div class="tab" data-tab="vocals" onclick="switchTab('vocals','${id}')">
+      <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+      Vocals Only
+    </div>
+  `;
+}
+
+let vocalsAudioEl = null;
+let vocalsOn = false;
+let _currentVideoJobId = null;
+
+function switchTab(tab, jobId) {
+  const id = jobId || currentJob.id;
+
+  _tabsEl().querySelectorAll('.tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.tab === tab);
+  });
+
+  const area = _playerAreaEl();
+
+  // Clean up previous state
+  if (activeMediaEl) {
+    activeMediaEl.removeEventListener('timeupdate', onTimeUpdate);
+    activeMediaEl.removeEventListener('play', onMediaPlay);
+    activeMediaEl.removeEventListener('pause', onMediaPause);
+    activeMediaEl.removeEventListener('seeked', onMediaSeeked);
+  }
+  // Destroy vocals sync when leaving video tab
+  if (tab !== 'video') destroyVocalsSync();
+
+  if (tab === 'video') {
+    area.innerHTML = `
+      <div class="video-container">
+        <video id="media-el" controls preload="metadata" src="/api/jobs/${id}/video"></video>
+        <div class="vocal-toggle">
+          <label class="toggle-switch" title="Toggle vocals">
+            <input type="checkbox" id="vocal-toggle-cb" onchange="toggleVocals(this.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+          <span class="toggle-label">Vocals</span>
+        </div>
+      </div>
+      <div class="tab-download">
+        <a class="btn-download-sm" href="/api/jobs/${id}/download/karaoke.mp4">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download Karaoke Video
+        </a>
+      </div>`;
+  } else if (tab === 'instrumental') {
+    area.innerHTML = `
+      <audio id="media-el" controls preload="metadata" src="/api/jobs/${id}/instrumental"></audio>
+      <div class="tab-download">
+        <a class="btn-download-sm" href="/api/jobs/${id}/download/instrumental.mp3">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download Instrumental
+        </a>
+      </div>`;
+  } else {
+    area.innerHTML = `
+      <audio id="media-el" controls preload="metadata" src="/api/jobs/${id}/vocals"></audio>
+      <div class="tab-download">
+        <a class="btn-download-sm" href="/api/jobs/${id}/download/vocals.mp3">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download Vocals
+        </a>
+      </div>`;
+  }
+
+  activeMediaEl = document.getElementById('media-el');
+  activeMediaEl.addEventListener('timeupdate', onTimeUpdate);
+
+  // Pre-load vocals audio for the video tab (must be after activeMediaEl is set)
+  if (tab === 'video') preloadVocalsAudio(id);
+
+  renderLyrics();
+}
+
+// --- Vocal toggle sync ---
+
+function preloadVocalsAudio(jobId) {
+  if (vocalsAudioEl && _currentVideoJobId === jobId) return;
+  destroyVocalsSync();
+
+  _currentVideoJobId = jobId;
+  vocalsAudioEl = new Audio(`/api/jobs/${jobId}/vocals`);
+  vocalsAudioEl.preload = 'auto';
+  vocalsAudioEl.volume = 0;
+  // Just preload — don't play until user interaction
+
+  activeMediaEl.addEventListener('play', onMediaPlay);
+  activeMediaEl.addEventListener('pause', onMediaPause);
+  activeMediaEl.addEventListener('seeked', onMediaSeeked);
+}
+
+function toggleVocals(on) {
+  vocalsOn = on;
+  _syncedOnce = false;
+  if (!vocalsAudioEl || !activeMediaEl) return;
+
+  if (on) {
+    vocalsAudioEl.volume = 1;
+    vocalsAudioEl.currentTime = activeMediaEl.currentTime + VOCALS_OFFSET;
+    if (!activeMediaEl.paused) {
+      vocalsAudioEl.play().catch(() => {});
+    }
+  } else {
+    vocalsAudioEl.volume = 0;
+    vocalsAudioEl.pause();
+  }
+}
+
+function destroyVocalsSync() {
+  if (vocalsAudioEl) {
+    vocalsAudioEl.pause();
+    vocalsAudioEl.src = '';
+    vocalsAudioEl = null;
+  }
+  vocalsOn = false;
+  _currentVideoJobId = null;
+  if (activeMediaEl) {
+    activeMediaEl.removeEventListener('play', onMediaPlay);
+    activeMediaEl.removeEventListener('pause', onMediaPause);
+    activeMediaEl.removeEventListener('seeked', onMediaSeeked);
+  }
+}
+
+function onMediaPlay() {
+  if (vocalsAudioEl && vocalsOn) {
+    vocalsAudioEl.currentTime = activeMediaEl.currentTime + VOCALS_OFFSET;
+    vocalsAudioEl.play().catch(() => {});
+  }
+}
+
+function onMediaPause() {
+  if (vocalsAudioEl) {
+    vocalsAudioEl.pause();
+  }
+}
+
+function onMediaSeeked() {
+  _syncedOnce = false;
+  if (vocalsAudioEl && vocalsOn) {
+    vocalsAudioEl.currentTime = activeMediaEl.currentTime + VOCALS_OFFSET;
+    if (!activeMediaEl.paused) {
+      vocalsAudioEl.play().catch(() => {});
+    }
+  }
+}
+
+// ---- Synced Lyrics ----
+
+const WORDS_PER_LINE = 6;
+let lyricsLines = [];
+let currentLineIdx = -1;
+
+function renderLyrics() {
+  const panel = _lyricsPanelEl();
+  panel.innerHTML = '';
+  lyricsLines = [];
+  currentLineIdx = -1;
+
+  if (!lyricsData || lyricsData.length === 0) {
+    panel.innerHTML = '<p style="color:#666">No lyrics available</p>';
+    return;
+  }
+
+  for (let i = 0; i < lyricsData.length; i += WORDS_PER_LINE) {
+    const chunk = lyricsData.slice(i, i + WORDS_PER_LINE);
+    const lineEl = document.createElement('div');
+    lineEl.className = 'lyrics-line';
+
+    const lineData = { words: [], el: lineEl };
+
+    chunk.forEach(w => {
+      const span = document.createElement('span');
+      span.className = 'lyrics-word';
+      span.textContent = w.text + ' ';
+      lineEl.appendChild(span);
+      lineData.words.push({ ...w, el: span });
+    });
+
+    panel.appendChild(lineEl);
+    lyricsLines.push(lineData);
+  }
+}
+
+let _syncedOnce = false;
+const VOCALS_OFFSET = 0.15; // seconds — compensate for MP3 encoder padding
+
+function onTimeUpdate() {
+  // One-time sync correction after playback starts
+  if (vocalsAudioEl && vocalsOn && !activeMediaEl.paused && !_syncedOnce) {
+    const expected = activeMediaEl.currentTime + VOCALS_OFFSET;
+    const drift = expected - vocalsAudioEl.currentTime;
+    if (Math.abs(drift) > 0.1) {
+      vocalsAudioEl.currentTime = expected;
+    }
+    _syncedOnce = true;
+  }
+
+  if (!activeMediaEl || !lyricsLines.length) return;
+  const t = activeMediaEl.currentTime;
+
+  let activeLine = -1;
+
+  for (let li = 0; li < lyricsLines.length; li++) {
+    const line = lyricsLines[li];
+    const lineStart = line.words[0].start;
+    const lineEnd = line.words[line.words.length - 1].end;
+    const isCurrentLine = t >= lineStart - 0.3 && t <= lineEnd + 0.5;
+
+    if (isCurrentLine) activeLine = li;
+
+    if (t > lineEnd + 0.5) {
+      line.el.className = 'lyrics-line past';
+    } else {
+      line.el.className = 'lyrics-line';
+    }
+
+    for (const w of line.words) {
+      if (t >= w.start && t < w.end) {
+        w.el.className = 'lyrics-word active';
+      } else if (t >= w.end) {
+        w.el.className = 'lyrics-word sung';
+      } else {
+        w.el.className = 'lyrics-word';
+      }
+    }
+  }
+
+  if (activeLine >= 0 && activeLine !== currentLineIdx) {
+    currentLineIdx = activeLine;
+    const panel = _lyricsPanelEl();
+    const lineEl = lyricsLines[activeLine].el;
+    const panelRect = panel.getBoundingClientRect();
+    const lineRect = lineEl.getBoundingClientRect();
+    const offset = lineRect.top - panelRect.top - panelRect.height / 3;
+    panel.scrollTop += offset;
+  }
+}
+
+// ---- Library ----
+
+let libraryItems = [];
+let libraryFilters = { search: '', channels: new Set(), categories: new Set() };
+
+async function loadLibrary() {
+  const sidebar = document.getElementById('library-sidebar');
+  const main = document.getElementById('library-main');
+  main.innerHTML = '<p style="text-align:center; color:#8a7e6b;">Loading...</p>';
+  sidebar.innerHTML = '';
+
+  try {
+    const resp = await fetch('/api/library');
+    const data = await resp.json();
+    libraryItems = data.items || [];
+
+    if (libraryItems.length === 0) {
+      sidebar.innerHTML = '';
+      main.innerHTML = `
+        <div class="library-empty">
+          <p>No songs yet.</p>
+          <p style="margin-top:8px;">Generate your first karaoke video to see it here.</p>
+        </div>
+      `;
+      return;
+    }
+
+    libraryFilters = { search: '', channels: new Set(), categories: new Set() };
+    renderLibrarySidebar();
+    renderLibraryGrid();
+  } catch (e) {
+    main.innerHTML = '<p style="text-align:center; color:#e07050;">Failed to load library</p>';
+  }
+}
+
+function renderLibrarySidebar() {
+  const sidebar = document.getElementById('library-sidebar');
+
+  // Collect facets
+  const channelCounts = {};
+  const categoryCounts = {};
+  for (const item of libraryItems) {
+    if (item.channel) channelCounts[item.channel] = (channelCounts[item.channel] || 0) + 1;
+    for (const cat of (item.categories || [])) {
+      categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
+    }
+  }
+
+  let html = `
+    <div class="filter-section">
+      <div class="filter-heading">Search</div>
+      <input class="filter-search" type="text" placeholder="Search songs..."
+             value="${escapeHtml(libraryFilters.search)}"
+             oninput="libraryFilters.search=this.value; renderLibraryGrid()" />
+    </div>
+  `;
+
+  // Channel facet
+  const channels = Object.entries(channelCounts).sort((a, b) => b[1] - a[1]);
+  if (channels.length > 0) {
+    html += `<div class="filter-section">
+      <div class="filter-heading">Channel</div>
+      <div class="filter-options">`;
+    for (const [ch, count] of channels) {
+      const active = libraryFilters.channels.has(ch);
+      html += `
+        <div class="filter-option ${active ? 'active' : ''}" onclick="toggleFilter('channels','${escapeHtml(ch)}')">
+          <div class="filter-check"></div>
+          <span class="filter-name" title="${escapeHtml(ch)}">${escapeHtml(ch)}</span>
+          <span class="filter-count">${count}</span>
+        </div>`;
+    }
+    html += `</div></div>`;
+  }
+
+  // Category facet
+  const categories = Object.entries(categoryCounts).sort((a, b) => b[1] - a[1]);
+  if (categories.length > 0) {
+    html += `<div class="filter-section">
+      <div class="filter-heading">Category</div>
+      <div class="filter-options">`;
+    for (const [cat, count] of categories) {
+      const active = libraryFilters.categories.has(cat);
+      html += `
+        <div class="filter-option ${active ? 'active' : ''}" onclick="toggleFilter('categories','${escapeHtml(cat)}')">
+          <div class="filter-check"></div>
+          <span class="filter-name">${escapeHtml(cat)}</span>
+          <span class="filter-count">${count}</span>
+        </div>`;
+    }
+    html += `</div></div>`;
+  }
+
+  // Clear filters
+  const hasFilters = libraryFilters.search || libraryFilters.channels.size || libraryFilters.categories.size;
+  if (hasFilters) {
+    html += `<a class="filter-clear" href="#" onclick="clearFilters(); return false;">Clear all filters</a>`;
+  }
+
+  sidebar.innerHTML = html;
+}
+
+function toggleFilter(facet, value) {
+  const set = libraryFilters[facet];
+  if (set.has(value)) set.delete(value);
+  else set.add(value);
+  renderLibrarySidebar();
+  renderLibraryGrid();
+}
+
+function clearFilters() {
+  libraryFilters = { search: '', channels: new Set(), categories: new Set() };
+  renderLibrarySidebar();
+  renderLibraryGrid();
+}
+
+function renderLibraryGrid() {
+  const main = document.getElementById('library-main');
+  const query = libraryFilters.search.toLowerCase();
+
+  const filtered = libraryItems.filter(item => {
+    // Text search
+    if (query) {
+      const haystack = [item.title, item.channel, ...(item.tags || [])].filter(Boolean).join(' ').toLowerCase();
+      if (!haystack.includes(query)) return false;
+    }
+    // Channel filter
+    if (libraryFilters.channels.size > 0 && !libraryFilters.channels.has(item.channel)) return false;
+    // Category filter
+    if (libraryFilters.categories.size > 0) {
+      const cats = item.categories || [];
+      if (!cats.some(c => libraryFilters.categories.has(c))) return false;
+    }
+    return true;
+  });
+
+  if (filtered.length === 0) {
+    main.innerHTML = `
+      <div class="library-results-count">${libraryItems.length} songs, 0 matching</div>
+      <div class="library-empty"><p>No songs match your filters.</p></div>
+    `;
+    return;
+  }
+
+  const count = `<div class="library-results-count">${filtered.length} of ${libraryItems.length} songs</div>`;
+  const grid = filtered.map(item => {
+    const duration = item.audio_duration ? formatDuration(item.audio_duration) : '';
+    const channel = item.channel ? escapeHtml(item.channel) : '';
+    const date = item.upload_date
+      ? item.upload_date.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3')
+      : '';
+    const thumb = item.thumbnail
+      ? `<img class="library-thumb" src="${item.thumbnail}" alt="" loading="lazy" />`
+      : `<div class="library-thumb" style="display:flex;align-items:center;justify-content:center;color:#4a3f2f;font-size:2rem;">&#9835;</div>`;
+    return `
+      <div class="library-item" onclick="showPlayerForJob('${item.id}')">
+        ${thumb}
+        <div class="library-info">
+          <h3>${escapeHtml(item.title || 'Unknown')}</h3>
+          ${channel ? `<div class="channel">${channel}</div>` : ''}
+          <span class="meta">${[duration, date].filter(Boolean).join(' &middot; ')}</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  main.innerHTML = count + '<div class="library-grid">' + grid + '</div>';
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// ---- Init ----
+
+async function init() {
+  try {
+    const resp = await fetch('/api/jobs/current');
+    const data = await resp.json();
+    if (!data.job) return;
+    currentJob = data.job;
+
+    if (currentJob.status === 'running') {
+      showProcessing();
+    } else if (currentJob.status === 'done') {
+      // Just stay on idle — user can go to library or click generate
+    } else if (currentJob.status === 'failed') {
+      showError(currentJob.error || 'Previous job failed. You can resume it.');
+    }
+  } catch (e) {
+    // Server not reachable — stay on idle
+  }
+}
+
+init();
+</script>
+</body>
+</html>

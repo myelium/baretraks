@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Output
+output/
+
+# OS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+
+# Claude
+.claude/

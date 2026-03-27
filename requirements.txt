@@ -1,0 +1,9 @@
+yt-dlp
+torch
+torchaudio
+demucs
+faster-whisper
+whisperx
+ffmpeg-python
+fastapi
+uvicorn[standard]
