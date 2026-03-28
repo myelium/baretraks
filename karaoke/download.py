@@ -131,3 +131,33 @@ def download(
     )
 
     return video_path, audio_path
+
+
+def download_audio(
+    url: str,
+    output_dir: Path,
+    progress_callback: Callable[[float], None] | None = None,
+) -> Path:
+    """
+    Download only the audio track from a YouTube video (no video).
+
+    Returns:
+        audio_path — audio as wav file
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    audio_path = output_dir / "audio.wav"
+    yt_dlp = [sys.executable, "-m", "yt_dlp"]
+
+    _run_ytdlp_with_progress(
+        yt_dlp + [
+            "-f", "bestaudio",
+            "-o", str(audio_path),
+            "--extract-audio",
+            "--audio-format", "wav",
+            "--no-playlist",
+            url,
+        ],
+        progress_callback=progress_callback,
+    )
+
+    return audio_path

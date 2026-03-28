@@ -5,5 +5,7 @@ demucs
 faster-whisper
 whisperx
 ffmpeg-python
+imageio-ffmpeg
+anthropic
 fastapi
 uvicorn[standard]

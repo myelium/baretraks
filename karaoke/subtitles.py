@@ -102,3 +102,42 @@ def build_ass(segments: list[Segment], output_path: Path) -> Path:
 
     output_path.write_text(ASS_HEADER + "\n".join(lines) + "\n")
     return output_path
+
+
+def _srt_time(seconds: float) -> str:
+    """Convert seconds to SRT timestamp HH:MM:SS,mmm"""
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = seconds % 60
+    whole = int(s)
+    ms = int(round((s - whole) * 1000))
+    return f"{h:02d}:{m:02d}:{whole:02d},{ms:03d}"
+
+
+def build_srt(segments: list[Segment], output_path: Path) -> Path:
+    """
+    Build a standard SRT subtitle file from Whisper segments.
+
+    Groups words into lines of WORDS_PER_LINE, with segment-level timing
+    divided proportionally across sub-lines.
+    """
+    entries = []
+    idx = 1
+
+    for seg in segments:
+        words = seg.words
+        n_lines = math.ceil(len(words) / WORDS_PER_LINE)
+        seg_duration = seg.end - seg.start
+
+        for i in range(n_lines):
+            chunk = words[i * WORDS_PER_LINE : (i + 1) * WORDS_PER_LINE]
+            line_start = seg.start + (i / n_lines) * seg_duration
+            line_end = seg.start + ((i + 1) / n_lines) * seg_duration
+            text = " ".join(w.text for w in chunk)
+            entries.append(
+                f"{idx}\n{_srt_time(line_start)} --> {_srt_time(line_end)}\n{text}"
+            )
+            idx += 1
+
+    output_path.write_text("\n\n".join(entries) + "\n")
+    return output_path

@@ -3,6 +3,9 @@
 import warnings
 warnings.filterwarnings("ignore", message=".*torchaudio.*torchcodec.*")
 
+from dotenv import load_dotenv
+load_dotenv()
+
 import json
 import re
 import secrets
@@ -20,11 +23,14 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+import shutil
+
 from karaoke.compose import compose
-from karaoke.download import download, fetch_metadata
+from karaoke.download import download, download_audio, fetch_metadata
 from karaoke.separate import separate
-from karaoke.subtitles import build_ass
+from karaoke.subtitles import build_ass, build_srt
 from karaoke.transcribe import transcribe
+from karaoke.translate import translate_srt
 
 FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 JOBS_DIR = Path("output/jobs")
@@ -109,6 +115,41 @@ STEP_NAMES = {
     5: "Composing video",
 }
 
+STEP_NAMES_SUBTITLED = {
+    1: "Downloading audio",
+    2: "Transcribing",
+    3: "Translating",
+}
+
+# Language code → full name for Claude translation prompts
+LANG_FULL_NAMES = {
+    "af": "Afrikaans", "sq": "Albanian", "am": "Amharic", "ar": "Arabic",
+    "hy": "Armenian", "as": "Assamese", "az": "Azerbaijani", "ba": "Bashkir",
+    "eu": "Basque", "be": "Belarusian", "bn": "Bengali", "bs": "Bosnian",
+    "br": "Breton", "bg": "Bulgarian", "my": "Burmese", "yue": "Cantonese",
+    "ca": "Catalan", "hr": "Croatian", "cs": "Czech", "da": "Danish",
+    "nl": "Dutch", "en": "English", "et": "Estonian", "fo": "Faroese",
+    "fi": "Finnish", "fr": "French", "gl": "Galician", "ka": "Georgian",
+    "de": "German", "el": "Greek", "gu": "Gujarati", "ht": "Haitian",
+    "ha": "Hausa", "haw": "Hawaiian", "he": "Hebrew", "hi": "Hindi",
+    "hu": "Hungarian", "is": "Icelandic", "id": "Indonesian", "it": "Italian",
+    "ja": "Japanese", "jw": "Javanese", "kn": "Kannada", "kk": "Kazakh",
+    "km": "Khmer", "ko": "Korean", "lo": "Lao", "la": "Latin",
+    "lv": "Latvian", "ln": "Lingala", "lt": "Lithuanian", "lb": "Luxembourgish",
+    "mk": "Macedonian", "mg": "Malagasy", "ms": "Malay", "ml": "Malayalam",
+    "mt": "Maltese", "zh": "Mandarin Chinese", "mi": "Maori", "mr": "Marathi",
+    "mn": "Mongolian", "ne": "Nepali", "no": "Norwegian", "nn": "Norwegian Nynorsk",
+    "oc": "Occitan", "ps": "Pashto", "fa": "Persian", "pl": "Polish",
+    "pt": "Portuguese", "pa": "Punjabi", "ro": "Romanian", "ru": "Russian",
+    "sa": "Sanskrit", "sr": "Serbian", "sn": "Shona", "sd": "Sindhi",
+    "si": "Sinhala", "sk": "Slovak", "sl": "Slovenian", "so": "Somali",
+    "es": "Spanish", "su": "Sundanese", "sw": "Swahili", "sv": "Swedish",
+    "tl": "Tagalog", "tg": "Tajik", "ta": "Tamil", "tt": "Tatar",
+    "te": "Telugu", "th": "Thai", "bo": "Tibetan", "tr": "Turkish",
+    "tk": "Turkmen", "uk": "Ukrainian", "ur": "Urdu", "uz": "Uzbek",
+    "vi": "Vietnamese", "cy": "Welsh", "yi": "Yiddish", "yo": "Yoruba",
+}
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -168,6 +209,12 @@ def _save_job_json() -> None:
         snapshot = dict(_job)
     job_json = Path(snapshot["output_dir"]) / "job.json"
     job_json.write_text(json.dumps(snapshot, default=str))
+
+
+def _cleanup_work_dir(work_dir: Path) -> None:
+    """Remove the work directory to free disk space after a successful job."""
+    if work_dir.exists():
+        shutil.rmtree(work_dir, ignore_errors=True)
 
 
 def _detect_resume_step(output_dir: Path) -> int:
@@ -350,6 +397,114 @@ def _run_pipeline(job_id: str, url: str, output_dir: Path,
         if audio_duration > 0 and step_durations:
             _save_stats(audio_duration, step_durations)
 
+        # Clean up work directory to save disk space
+        _cleanup_work_dir(work_dir)
+
+        _update_job(status="done", finished_at=_now_iso(),
+                    step_durations=step_durations)
+        _save_job_json()
+
+    except Exception as e:
+        _update_job(status="failed", error=str(e), finished_at=_now_iso())
+        _save_job_json()
+
+
+def _run_subtitled_pipeline(job_id: str, url: str, output_dir: Path,
+                            languages: list[str] | None = None) -> None:
+    """Run the subtitled video pipeline (audio-only download + multi-language transcription)."""
+    if not languages:
+        languages = []
+    try:
+        device = "cpu"
+        work_dir = output_dir / "work"
+        work_dir.mkdir(parents=True, exist_ok=True)
+
+        audio_path = work_dir / "audio.wav"
+        step_durations: dict[str, float] = {}
+        num_langs = len(languages)
+
+        # --- Step 1: Download audio only ---
+        t0 = time.monotonic()
+        _update_job(step=1, step_name=STEP_NAMES_SUBTITLED[1], step_progress=0.0,
+                     step_started_at=_now_iso())
+        _save_job_json()
+
+        def _dl_progress(pct: float) -> None:
+            _update_job(step_progress=pct)
+
+        audio_path = download_audio(url, work_dir, progress_callback=_dl_progress)
+        step_durations["1"] = time.monotonic() - t0
+
+        audio_duration = _get_audio_duration(audio_path)
+        # Rough estimate: transcription takes ~2x audio duration per language
+        est_transcribe = audio_duration * 2.0 * max(num_langs, 1)
+        _update_job(
+            step_progress=1.0,
+            audio_duration=audio_duration,
+            step_estimates=[step_durations["1"], est_transcribe],
+            estimated_total=step_durations["1"] + est_transcribe,
+            artifacts={1: []},
+        )
+
+        # --- Step 2: Transcribe in source language (Whisper auto-detect) ---
+        t0 = time.monotonic()
+        _update_job(step=2, step_name=STEP_NAMES_SUBTITLED[2], step_progress=0.0,
+                     step_started_at=_now_iso())
+        _save_job_json()
+
+        # Whisper transcribes in the original language (what it does best)
+        segments = transcribe(audio_path, device=device)
+
+        # Save lyrics.json from the source-language transcription
+        words_list = []
+        for seg in segments:
+            for w in seg.words:
+                words_list.append({"text": w.text, "start": w.start, "end": w.end})
+        (output_dir / "lyrics.json").write_text(json.dumps(words_list))
+
+        # Generate source-language SRT (used as base for Claude translations)
+        source_srt_path = output_dir / "subtitles_source.srt"
+        build_srt(segments, source_srt_path)
+
+        step_durations["2"] = time.monotonic() - t0
+        srt_artifacts = []
+        _update_job(step_progress=1.0, artifacts={
+            1: [],
+            2: [{"name": "lyrics.json", "path": "lyrics.json"}],
+        })
+
+        # --- Step 3: Translate to all target languages via Claude API ---
+        if languages:
+            t0 = time.monotonic()
+            source_srt_text = source_srt_path.read_text()
+
+            for i, lang in enumerate(languages):
+                target_name = LANG_FULL_NAMES.get(lang, lang)
+                label = (f"Translating to {target_name}"
+                         f" ({i+1} of {len(languages)})" if len(languages) > 1
+                         else f"Translating to {target_name}")
+                _update_job(step=3, step_name=label,
+                             step_progress=i / len(languages),
+                             step_started_at=_now_iso())
+                _save_job_json()
+
+                translated_srt = translate_srt(source_srt_text, target_name)
+                srt_name = f"subtitles_{lang}.srt"
+                (output_dir / srt_name).write_text(translated_srt)
+                srt_artifacts.append({"name": srt_name, "path": srt_name})
+
+            step_durations["3"] = time.monotonic() - t0
+            _update_job(step_progress=1.0, artifacts={
+                1: [],
+                2: srt_artifacts + [{"name": "lyrics.json", "path": "lyrics.json"}],
+            })
+
+        # Clean up intermediate source SRT (keep only the per-language ones)
+        source_srt_path.unlink(missing_ok=True)
+
+        # Clean up work directory
+        _cleanup_work_dir(work_dir)
+
         _update_job(status="done", finished_at=_now_iso(),
                     step_durations=step_durations)
         _save_job_json()
@@ -388,12 +543,31 @@ def _recover_jobs() -> None:
         _job = data
         break  # only restore the most recent
 
+    # Clean up work directories for all completed jobs
+    for d in JOBS_DIR.iterdir():
+        if not d.is_dir():
+            continue
+        work_dir = d / "work"
+        if not work_dir.exists():
+            continue
+        job_json = d / "job.json"
+        if job_json.exists():
+            try:
+                data = json.loads(job_json.read_text())
+                if data.get("status") == "done":
+                    _cleanup_work_dir(work_dir)
+            except (json.JSONDecodeError, OSError):
+                pass
+
 
 # ---------------------------------------------------------------------------
 # API
 # ---------------------------------------------------------------------------
 class JobRequest(BaseModel):
     url: str
+    mode: str = "karaoke"          # "karaoke" or "subtitled"
+    language: str | None = None     # DEPRECATED: single language (backward compat)
+    languages: list[str] = []      # Whisper language codes (e.g. ["en", "es"]), max 3
 
 
 def _slugify(text: str, max_len: int = 60) -> str:
@@ -427,9 +601,19 @@ def create_job(req: JobRequest):
     output_dir = JOBS_DIR / job_id
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    mode = req.mode if req.mode in ("karaoke", "subtitled") else "karaoke"
+    # Support both old single language and new multi-language
+    languages = req.languages[:3] if req.languages else (
+        [req.language] if req.language else []
+    )
+    if mode != "subtitled":
+        languages = []
+
     _job = {
         "id": job_id,
         "url": req.url,
+        "mode": mode,
+        "languages": languages,
         "title": title,
         "thumbnail": thumbnail,
         "channel": meta.get("channel"),
@@ -452,8 +636,16 @@ def create_job(req: JobRequest):
     }
     _save_job_json()
 
-    thread = threading.Thread(target=_run_pipeline, args=(job_id, req.url, output_dir),
-                              daemon=True)
+    if mode == "subtitled":
+        thread = threading.Thread(
+            target=_run_subtitled_pipeline,
+            args=(job_id, req.url, output_dir, languages),
+            daemon=True)
+    else:
+        thread = threading.Thread(
+            target=_run_pipeline,
+            args=(job_id, req.url, output_dir),
+            daemon=True)
     thread.start()
 
     return {"job": _job}
@@ -544,6 +736,8 @@ def get_library():
             "id": data.get("id", d.name),
             "title": data.get("title", "Unknown"),
             "url": data.get("url"),
+            "mode": data.get("mode", "karaoke"),
+            "languages": data.get("languages") or ([data["language"]] if data.get("language") else []),
             "thumbnail": data.get("thumbnail"),
             "channel": data.get("channel"),
             "upload_date": data.get("upload_date"),
@@ -554,6 +748,54 @@ def get_library():
         })
     items.sort(key=lambda x: x.get("finished_at") or "", reverse=True)
     return {"items": items}
+
+
+def _extract_video_id(url: str) -> str | None:
+    """Extract the YouTube video ID from various URL formats."""
+    m = re.search(r"(?:v=|youtu\.be/|/embed/|/v/|/shorts/)([A-Za-z0-9_-]{11})", url)
+    return m.group(1) if m else None
+
+
+@app.get("/api/library/check-url")
+def check_url_in_library(url: str, mode: str = "karaoke"):
+    """Check if a YouTube URL has already been generated in the library for the given mode."""
+    video_id = _extract_video_id(url)
+    if not video_id:
+        return {"found": False}
+
+    if not JOBS_DIR.exists():
+        return {"found": False}
+
+    for d in JOBS_DIR.iterdir():
+        if not d.is_dir():
+            continue
+        job_json = d / "job.json"
+        if not job_json.exists():
+            continue
+        try:
+            data = json.loads(job_json.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        if data.get("status") != "done":
+            continue
+        if data.get("mode", "karaoke") != mode:
+            continue
+        existing_id = _extract_video_id(data.get("url", ""))
+        if existing_id == video_id:
+            return {
+                "found": True,
+                "item": {
+                    "id": data.get("id", d.name),
+                    "title": data.get("title", "Unknown"),
+                    "url": data.get("url"),
+                    "mode": data.get("mode", "karaoke"),
+                    "thumbnail": data.get("thumbnail"),
+                    "channel": data.get("channel"),
+                    "finished_at": data.get("finished_at"),
+                },
+            }
+
+    return {"found": False}
 
 
 @app.get("/api/jobs/{job_id}/video")
@@ -588,12 +830,69 @@ def get_lyrics(job_id: str):
     return json.loads(path.read_text())
 
 
+@app.get("/api/jobs/{job_id}/subtitles/{lang_code}")
+def get_subtitles_lang(job_id: str, lang_code: str):
+    """Serve per-language SRT file."""
+    # Sanitize lang_code to prevent path traversal
+    if not re.match(r"^[a-z]{2,3}$", lang_code):
+        raise HTTPException(400, "Invalid language code")
+    path = JOBS_DIR / job_id / f"subtitles_{lang_code}.srt"
+    if not path.exists():
+        raise HTTPException(404, "Subtitles not found")
+    filename = f"subtitles_{lang_code}.srt"
+    return FileResponse(path, media_type="text/plain",
+                        filename=filename,
+                        headers={"Content-Disposition": f"attachment; filename={filename}"})
+
+
+@app.get("/api/jobs/{job_id}/subtitles")
+def get_subtitles(job_id: str):
+    """Backward compat: serve first available SRT file."""
+    job_dir = JOBS_DIR / job_id
+    # Try to find any subtitles_*.srt file
+    for f in sorted(job_dir.glob("subtitles_*.srt")):
+        return FileResponse(f, media_type="text/plain",
+                            filename=f.name,
+                            headers={"Content-Disposition": f"attachment; filename={f.name}"})
+    # Fall back to old single-file format
+    path = job_dir / "subtitles.srt"
+    if path.exists():
+        return FileResponse(path, media_type="text/plain",
+                            filename="subtitles.srt",
+                            headers={"Content-Disposition": "attachment; filename=subtitles.srt"})
+    raise HTTPException(404, "Subtitles not found")
+
+
+@app.delete("/api/jobs/{job_id}")
+def delete_job(job_id: str):
+    """Delete a job and all its files from disk."""
+    global _job
+    job_dir = JOBS_DIR / job_id
+    if not job_dir.exists() or not job_dir.is_dir():
+        raise HTTPException(404, "Job not found")
+
+    # Don't allow deleting a running job
+    with _lock:
+        if _job is not None and _job.get("id") == job_id and _job.get("status") == "running":
+            raise HTTPException(409, "Cannot delete a running job")
+
+    shutil.rmtree(job_dir)
+
+    # Clear current job reference if it was the deleted one
+    with _lock:
+        if _job is not None and _job.get("id") == job_id:
+            _job = None
+
+    return {"deleted": True}
+
+
 @app.get("/api/jobs/{job_id}/download/{filename}")
 def download_file(job_id: str, filename: str):
-    # Only allow specific files
-    allowed = {"karaoke.mp4", "instrumental.mp3", "vocals.mp3"}
-    if filename not in allowed:
-        raise HTTPException(400, f"Invalid file. Allowed: {', '.join(allowed)}")
+    # Allow specific files + subtitles_*.srt pattern
+    static_allowed = {"karaoke.mp4", "instrumental.mp3", "vocals.mp3", "subtitles.srt"}
+    is_subtitle = bool(re.match(r"^subtitles_[a-z]{2,3}\.srt$", filename))
+    if filename not in static_allowed and not is_subtitle:
+        raise HTTPException(400, "Invalid file")
     path = JOBS_DIR / job_id / filename
     if not path.exists():
         raise HTTPException(404, "File not found")
@@ -602,9 +901,10 @@ def download_file(job_id: str, filename: str):
         "instrumental.mp3": "audio/mpeg",
         "vocals.mp3": "audio/mpeg",
     }
+    media_type = media_types.get(filename, "text/plain")
     return FileResponse(
         path,
-        media_type=media_types[filename],
+        media_type=media_type,
         filename=filename,
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
@@ -632,6 +932,11 @@ def download_artifact(job_id: str, filepath: str):
 @app.get("/")
 def index():
     return FileResponse("static/index.html")
+
+
+@app.get("/favicon.ico")
+def favicon():
+    return FileResponse("static/favicon.png", media_type="image/png")
 
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
