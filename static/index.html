@@ -9,84 +9,298 @@
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@400;500;600;700&display=swap');
 
+  /* === Theme & Dark Mode Variables === */
+  :root, body[data-theme="retro"][data-mode="dark"] {
+    --bg-base: #1a1612; --bg-card: #231e18; --bg-input: #1a1612; --bg-hover: #2a2520;
+    --border: #3a3226; --border-light: #2a2520; --border-accent: #4a3f2f;
+    --text: #d4c8b0; --text-bright: #e8d5a3; --text-dim: #8a7e6b; --text-muted: #6b6050;
+    --accent: #b48c3c; --accent-hover: #c99d48; --accent-text: #1a1612;
+    --success: #7a8a3c; --error: #e07050; --info: #7eb8da;
+    --divider-bg: #1e1a16;
+  }
+  body[data-theme="retro"][data-mode="day"] {
+    --bg-base: #f5f0e8; --bg-card: #fff; --bg-input: #f0ebe3; --bg-hover: #e8e0d4;
+    --border: #d4c8b0; --border-light: #e0d8c8; --border-accent: #c0b090;
+    --text: #3a3226; --text-bright: #1a1612; --text-dim: #6b6050; --text-muted: #8a7e6b;
+    --accent: #b48c3c; --accent-hover: #9a7530; --accent-text: #fff;
+    --success: #5a7a2c; --error: #c04030; --info: #4a90b8;
+    --divider-bg: #e8e0d4;
+  }
+  body[data-theme="retro"][data-mode="night"] {
+    --bg-base: #0e0c09; --bg-card: #161210; --bg-input: #0e0c09; --bg-hover: #1a1612;
+    --border: #2a2520; --border-light: #1e1a16; --border-accent: #3a3226;
+    --text: #a09880; --text-bright: #c0b898; --text-dim: #6b6050; --text-muted: #4a3f35;
+    --accent: #8a6a20; --accent-hover: #b48c3c; --accent-text: #0e0c09;
+    --success: #5a6a2c; --error: #a04030; --info: #4a7090;
+    --divider-bg: #121010;
+  }
+  body[data-theme="spotify"][data-mode="dark"] {
+    --bg-base: #121212; --bg-card: #1e1e1e; --bg-input: #121212; --bg-hover: #282828;
+    --border: #333; --border-light: #222; --border-accent: #444;
+    --text: #b3b3b3; --text-bright: #fff; --text-dim: #737373; --text-muted: #535353;
+    --accent: #1DB954; --accent-hover: #1ed760; --accent-text: #000;
+    --success: #1DB954; --error: #f15e6c; --info: #4a90d9;
+    --divider-bg: #181818;
+  }
+  body[data-theme="spotify"][data-mode="day"] {
+    --bg-base: #f8f8f8; --bg-card: #fff; --bg-input: #f0f0f0; --bg-hover: #e8e8e8;
+    --border: #ddd; --border-light: #eee; --border-accent: #ccc;
+    --text: #333; --text-bright: #000; --text-dim: #737373; --text-muted: #999;
+    --accent: #1DB954; --accent-hover: #18a34a; --accent-text: #fff;
+    --success: #1DB954; --error: #e04050; --info: #3a80c9;
+    --divider-bg: #eee;
+  }
+  body[data-theme="spotify"][data-mode="night"] {
+    --bg-base: #0a0a0a; --bg-card: #141414; --bg-input: #0a0a0a; --bg-hover: #1a1a1a;
+    --border: #252525; --border-light: #1a1a1a; --border-accent: #333;
+    --text: #888; --text-bright: #ccc; --text-dim: #555; --text-muted: #444;
+    --accent: #1DB954; --accent-hover: #1ed760; --accent-text: #000;
+    --success: #1a9944; --error: #c04050; --info: #3a70a9;
+    --divider-bg: #0f0f0f;
+  }
+  body[data-theme="disco"][data-mode="dark"] {
+    --bg-base: #1a0a2e; --bg-card: #221440; --bg-input: #1a0a2e; --bg-hover: #2e1a50;
+    --border: #3a2060; --border-light: #2a1545; --border-accent: #4a2a70;
+    --text: #d0c0e8; --text-bright: #f0e0ff; --text-dim: #8070a0; --text-muted: #605080;
+    --accent: #ff69b4; --accent-hover: #ff85c8; --accent-text: #1a0a2e;
+    --success: #00ffaa; --error: #ff4060; --info: #00d4ff;
+    --divider-bg: #1e0e35;
+  }
+  body[data-theme="disco"][data-mode="day"] {
+    --bg-base: #f8f0ff; --bg-card: #fff; --bg-input: #f0e8f8; --bg-hover: #e8d8f0;
+    --border: #d0b8e0; --border-light: #e0d0f0; --border-accent: #c0a0d0;
+    --text: #3a2060; --text-bright: #1a0a2e; --text-dim: #7060a0; --text-muted: #9080b0;
+    --accent: #d44090; --accent-hover: #b03070; --accent-text: #fff;
+    --success: #00aa70; --error: #d03050; --info: #0090c0;
+    --divider-bg: #e8d8f0;
+  }
+  body[data-theme="disco"][data-mode="night"] {
+    --bg-base: #0d0518; --bg-card: #140a22; --bg-input: #0d0518; --bg-hover: #1a0e2e;
+    --border: #2a1540; --border-light: #1a0e2e; --border-accent: #3a2055;
+    --text: #a090c0; --text-bright: #c8b8e0; --text-dim: #605080; --text-muted: #4a3a60;
+    --accent: #c05090; --accent-hover: #e070b0; --accent-text: #0d0518;
+    --success: #00cc80; --error: #c03050; --info: #0080b0;
+    --divider-bg: #100820;
+  }
+
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    background: #1a1612;
-    background-image:
-      radial-gradient(ellipse at 20% 0%, rgba(180,140,60,0.06) 0%, transparent 60%),
-      radial-gradient(ellipse at 80% 100%, rgba(120,80,30,0.05) 0%, transparent 60%);
-    color: #d4c8b0;
+    background: var(--bg-base);
+    color: var(--text);
+    margin: 0;
     min-height: 100vh;
     display: flex;
-    justify-content: center;
-    align-items: flex-start;
-    padding: 40px 20px;
+    flex-direction: column;
+    transition: background 0.3s, color 0.3s;
   }
 
-  #app { width: 100%; max-width: 800px; transition: max-width 0.3s; }
-  #app.wide { max-width: 1000px; }
+  #app { width: 100%; flex: 1; display: flex; flex-direction: column; }
 
   .header {
     display: flex;
-    flex-direction: column;
     align-items: center;
-    margin-bottom: 8px;
+    gap: 12px;
+    padding: 12px 24px;
+    border-bottom: 1px solid var(--border-light);
+    flex-shrink: 0;
+    background: var(--bg-card);
   }
   .logo {
-    width: 180px;
+    width: 72px;
     height: auto;
-    margin-bottom: 16px;
-    filter: drop-shadow(0 4px 12px rgba(0,0,0,0.4));
+    filter: drop-shadow(0 2px 6px rgba(0,0,0,0.4));
   }
-  h1 {
-    text-align: center;
-    font-family: 'Playfair Display', Georgia, serif;
-    font-size: 2rem;
-    margin-bottom: 8px;
-    color: #e8d5a3;
-    letter-spacing: 0.02em;
-  }
-  .subtitle {
-    text-align: center;
+  .tagline {
+    font-size: 0.8rem;
     color: #8a7e6b;
-    margin-bottom: 24px;
-    font-size: 0.95rem;
     letter-spacing: 0.15em;
     text-transform: uppercase;
     font-weight: 600;
   }
-
-  /* --- Nav --- */
-  .nav {
-    display: flex;
-    justify-content: center;
-    gap: 8px;
-    margin-bottom: 24px;
-  }
-  .nav-btn {
-    padding: 8px 24px;
-    border-radius: 20px;
-    border: 1px solid #4a3f2f;
-    background: transparent;
-    color: #8a7e6b;
+  .subtitle { display: none; }
+  .header-tagline {
     font-size: 0.9rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
-    letter-spacing: 0.03em;
+    color: var(--text-dim);
+    letter-spacing: 0.04em;
+    line-height: 1.5;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
   }
-  .nav-btn.active { background: #b48c3c; border-color: #b48c3c; color: #1a1612; }
-  .nav-btn:hover:not(.active) { border-color: #b48c3c; color: #d4c8b0; }
+  .header-tagline-sub {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    font-style: italic;
+    letter-spacing: 0.06em;
+  }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .darkmode-toggle {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 1px solid var(--border-accent);
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: color 0.2s, border-color 0.2s;
+    padding: 0;
+    line-height: 1;
+  }
+  .darkmode-toggle:hover { color: var(--accent); border-color: var(--accent); }
+
+  .user-menu {
+    position: relative;
+  }
+  .user-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: #3a3226;
+    color: #e8d5a3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 700;
+    cursor: pointer;
+    border: 1px solid #4a3f35;
+    transition: border-color 0.2s;
+  }
+  .user-avatar:hover { border-color: #b48c3c; }
+  .user-avatar img {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    object-fit: cover;
+  }
+  .user-dropdown {
+    position: absolute;
+    top: 40px;
+    right: 0;
+    background: #231e18;
+    border: 1px solid #3a3226;
+    border-radius: 10px;
+    padding: 6px 0;
+    min-width: 160px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    z-index: 100;
+    display: none;
+  }
+  .user-dropdown.open { display: block; }
+  .user-dropdown-item {
+    display: block;
+    width: 100%;
+    padding: 8px 16px;
+    background: none;
+    border: none;
+    color: #c0b090;
+    font-size: 0.85rem;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .user-dropdown-item:hover { background: #2a2520; }
+  .user-dropdown-divider { height: 1px; background: #3a3226; margin: 4px 0; }
+  .user-dropdown-header {
+    padding: 8px 16px 4px;
+    font-size: 0.75rem;
+    color: #6b6050;
+    font-weight: 600;
+  }
+
+  /* --- Split Pane --- */
+  .split-pane {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .pane-production {
+    flex: 0 0 30%;
+    min-width: 120px;
+    max-width: calc(100% - 258px);
+    transition: flex-basis 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow-y: auto;
+    padding: 20px;
+    border-right: none;
+  }
+
+  .pane-divider {
+    flex: 0 0 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    background: #1e1a16;
+    border-left: 1px solid #2a2520;
+    border-right: 1px solid #2a2520;
+    cursor: default;
+    position: relative;
+    z-index: 5;
+    transition: background 0.2s;
+  }
+  .pane-divider:hover { background: #2a2520; }
+
+  .divider-btn {
+    background: none;
+    border: none;
+    color: #6b6050;
+    cursor: pointer;
+    font-size: 0.65rem;
+    padding: 6px 2px;
+    line-height: 1;
+    transition: color 0.2s;
+    display: block;
+  }
+  .divider-btn:hover { color: #b48c3c; }
+
+  .pane-library {
+    flex: 1;
+    min-width: 250px;
+    transition: flex-basis 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow-y: auto;
+    padding: 20px;
+  }
+
+  /* Pane states */
+  .split-pane.lib-expanded .pane-production { flex-basis: 0%; min-width: 0; overflow: hidden; padding: 0; }
+
+  .pane-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: #6b6050;
+    font-weight: 600;
+    margin-bottom: 16px;
+  }
+
+  /* Mobile: stacked */
+  @media (max-width: 768px) {
+    .split-pane { flex-direction: column; }
+    .pane-production { flex-basis: auto !important; min-width: 0; max-width: none; max-height: 40vh; }
+    .pane-divider { flex-direction: row; height: 12px; width: 100%; border-left: none; border-right: none; border-top: 1px solid #2a2520; border-bottom: 1px solid #2a2520; }
+    .pane-library { min-width: 0; }
+  }
 
   /* --- Card --- */
   .card {
-    background: #231e18;
-    border-radius: 16px;
-    padding: 32px;
-    border: 1px solid #3a3226;
-    box-shadow: 0 4px 24px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.03);
+    background: var(--bg-card);
+    border-radius: 12px;
+    padding: 20px;
+    border: 1px solid var(--border);
   }
 
   .input-row {
@@ -101,6 +315,7 @@
     gap: 20px;
     padding: 0 4px;
     flex-wrap: wrap;
+    min-height: 40px;
   }
 
   .mode-row label {
@@ -181,12 +396,14 @@
 
   input[type="text"] {
     flex: 1;
-    padding: 12px 16px;
-    border-radius: 10px;
+    box-sizing: border-box;
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 8px;
     border: 1px solid #4a3f2f;
     background: #1a1612;
     color: #e8d5a3;
-    font-size: 1rem;
+    font-size: 0.85rem;
     outline: none;
     transition: border-color 0.2s;
     font-family: inherit;
@@ -195,10 +412,12 @@
   input[type="text"]:focus { border-color: #b48c3c; box-shadow: 0 0 0 2px rgba(180,140,60,0.15); }
 
   button {
-    padding: 12px 24px;
-    border-radius: 10px;
+    box-sizing: border-box;
+    height: 32px;
+    padding: 0 16px;
+    border-radius: 8px;
     border: none;
-    font-size: 1rem;
+    font-size: 0.85rem;
     cursor: pointer;
     font-weight: 600;
     font-family: inherit;
@@ -206,9 +425,9 @@
   }
   button:active { transform: scale(0.97); }
 
-  .btn-primary { background: #b48c3c; color: #1a1612; }
-  .btn-primary:hover { background: #c99d48; }
-  .btn-primary:disabled { background: #4a3f2f; color: #6b6050; cursor: not-allowed; }
+  .btn-primary { background: var(--accent); color: var(--accent-text); }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-primary:disabled { background: var(--border-accent); color: var(--text-muted); cursor: not-allowed; }
 
   .btn-secondary { background: #3a3226; color: #d4c8b0; }
   .btn-secondary:hover { background: #4a3f2f; }
@@ -308,23 +527,10 @@
 
   /* --- Two-column processing layout --- */
   .processing-columns {
-    display: grid;
-    grid-template-columns: 1fr 260px;
-    gap: 20px;
-    align-items: start;
-  }
-  @media (max-width: 700px) {
-    .processing-columns { grid-template-columns: 1fr; }
+    display: block;
   }
   .processing-left { min-width: 0; }
-  .processing-right {
-    background: #1a1612;
-    border: 1px solid #3a3226;
-    border-radius: 12px;
-    padding: 16px;
-    position: sticky;
-    top: 20px;
-  }
+  .processing-right { display: none; }
   .output-heading {
     font-family: inherit;
     font-size: 1rem;
@@ -397,10 +603,13 @@
 
   /* --- Done State: Media Player --- */
   .player-title {
-    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
     font-size: 1.2rem;
     font-weight: 600;
-    color: #e8d5a3;
+    color: var(--text-bright);
     margin-bottom: 16px;
   }
   .tabs {
@@ -445,6 +654,30 @@
 
   /* --- Video container with vocal toggle --- */
   .video-container { position: relative; }
+  .video-container video::-webkit-media-controls-fullscreen-button { display: none; }
+  .video-container video { width: 100%; display: block; border-radius: 8px; }
+  .video-container:fullscreen { background: #000; display: flex; align-items: center; justify-content: center; }
+  .video-container:fullscreen video { max-height: 100vh; border-radius: 0; }
+  .video-container:fullscreen .vocal-toggle { bottom: 70px; }
+  .karaoke-fullscreen-btn {
+    position: absolute;
+    bottom: 56px;
+    left: 12px;
+    background: rgba(26,22,18,0.85);
+    backdrop-filter: blur(6px);
+    border: 1px solid rgba(74,63,47,0.6);
+    border-radius: 20px;
+    padding: 6px 10px;
+    color: #d4c8b0;
+    cursor: pointer;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    opacity: 0.8;
+    transition: opacity 0.2s;
+  }
+  .karaoke-fullscreen-btn:hover { opacity: 1; }
+  .video-container:fullscreen .karaoke-fullscreen-btn { bottom: 70px; }
 
   .yt-player-container {
     position: relative;
@@ -574,6 +807,9 @@
   }
 
   /* --- Lyrics Panel --- */
+  .lyrics-panel:empty {
+    display: none;
+  }
   .lyrics-panel {
     margin-top: 16px;
     background: #1a1612;
@@ -616,23 +852,85 @@
 
   /* --- Library --- */
   .library-layout {
-    display: grid;
-    grid-template-columns: 220px 1fr;
-    gap: 20px;
-    align-items: start;
-  }
-  @media (max-width: 700px) {
-    .library-layout { grid-template-columns: 1fr; }
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
   }
 
-  .library-sidebar {
-    background: #231e18;
-    border: 1px solid #3a3226;
-    border-radius: 12px;
-    padding: 16px;
-    position: sticky;
-    top: 20px;
+  .library-sidebar { display: none; }
+
+  /* Compact filter bar */
+  .library-filter-bar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
   }
+  .library-filter-bar input[type="text"],
+  .library-filter-bar select {
+    box-sizing: border-box;
+    height: 32px;
+    padding: 0 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-input);
+    color: var(--text-bright);
+    font-size: 0.82rem;
+    font-family: inherit;
+    outline: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+  }
+  .library-filter-bar select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238a7e6b'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 28px;
+  }
+  .library-filter-bar input[type="text"] {
+    flex: 2;
+    min-width: 180px;
+  }
+  .library-filter-bar input[type="text"]::placeholder { color: var(--text-muted); }
+  .library-filter-bar input[type="text"]:focus,
+  .library-filter-bar input[type="text"]:focus,
+  .library-filter-bar select:focus { border-color: var(--accent); }
+
+  .library-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  .library-header .divider-pipe { color: var(--border-accent); font-weight: 300; font-size: 0.7rem; }
+  .library-tabs {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .filter-tab.library-tab {
+    margin-left: -14px;
+  }
+
+  .filter-tabs { display: flex; gap: 4px; }
+  .filter-tab {
+    padding: 4px 14px;
+    border-radius: 6px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .filter-tab.active { background: var(--accent); color: var(--accent-text); }
+  .filter-tab:hover:not(.active) { color: var(--text); }
+
   .filter-section { margin-bottom: 16px; }
   .filter-section:last-child { margin-bottom: 0; }
   .filter-heading {
@@ -729,6 +1027,7 @@
   }
 
   .library-item {
+    position: relative;
     background: #231e18;
     border: 1px solid #3a3226;
     border-radius: 14px;
@@ -818,7 +1117,30 @@
     transition: opacity 0.2s, color 0.2s, border-color 0.2s;
   }
   .library-item:hover .library-delete-btn { opacity: 1; }
+  .library-share-btn { opacity: 0.7; }
   .library-delete-btn:hover { color: #e07050; border-color: rgba(224,112,80,0.5); }
+
+  .library-share-btn {
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid rgba(74,63,47,0.5);
+    background: rgba(26,22,18,0.85);
+    backdrop-filter: blur(4px);
+    color: #8a7e6b;
+    font-size: 0.85rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.7;
+    transition: opacity 0.2s, color 0.2s, border-color 0.2s;
+  }
+  .library-share-btn:hover { color: #b48c3c; border-color: rgba(180,140,60,0.5); }
 
   .library-empty {
     text-align: center;
@@ -933,6 +1255,288 @@
     margin-bottom: 4px;
   }
 
+  .player-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.85);
+    z-index: 500;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    overflow-y: auto;
+    padding: 40px 20px;
+  }
+  .player-overlay-content {
+    width: 100%;
+    max-width: 900px;
+    background: #231e18;
+    border-radius: 16px;
+    padding: 32px;
+    border: 1px solid #3a3226;
+    box-shadow: 0 8px 48px rgba(0,0,0,0.6);
+    position: relative;
+  }
+  .player-overlay-actions {
+    position: absolute;
+    top: 12px;
+    right: 16px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    z-index: 10;
+  }
+  .player-overlay-share {
+    background: none;
+    border: none;
+    color: #8a7e6b;
+    cursor: pointer;
+    padding: 6px 8px;
+    border-radius: 8px;
+    transition: color 0.2s, background 0.2s;
+    display: flex;
+    align-items: center;
+  }
+  .player-overlay-share:hover { color: #e8d5a3; background: rgba(255,255,255,0.05); }
+  .player-overlay-close {
+    background: none;
+    border: none;
+    color: #8a7e6b;
+    font-size: 2rem;
+    cursor: pointer;
+    line-height: 1;
+    padding: 4px 8px;
+    border-radius: 8px;
+    transition: color 0.2s, background 0.2s;
+  }
+  .player-overlay-close:hover { color: #e8d5a3; background: rgba(255,255,255,0.05); }
+
+  /* --- Voting --- */
+  .vote-controls {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    font-size: 0.75rem;
+  }
+  .vote-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px 4px;
+    font-size: 0.85rem;
+    line-height: 1;
+    color: var(--text-muted);
+    transition: color 0.2s;
+    height: auto;
+    border-radius: 4px;
+  }
+  .vote-btn:hover { color: var(--text-bright); }
+  .vote-btn.upvoted { color: var(--success); }
+  .vote-btn.downvoted { color: var(--error); }
+  .vote-count {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-dim);
+    min-width: 16px;
+    text-align: center;
+  }
+
+  .vote-controls-compact {
+    display: inline-flex;
+    align-items: center;
+    gap: 1px;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
+  .vote-btn-sm {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0 2px;
+    font-size: 0.6rem;
+    line-height: 1;
+    color: var(--text-muted);
+    transition: color 0.15s;
+    height: auto;
+    border-radius: 2px;
+  }
+  .vote-btn-sm:hover { color: var(--text-bright); }
+  .vote-btn-sm.upvoted { color: var(--success); }
+  .vote-btn-sm.downvoted { color: var(--error); }
+  .vote-count-sm {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    min-width: 10px;
+    text-align: center;
+    margin-right: 4px;
+  }
+
+  /* --- Feedback type buttons --- */
+  .feedback-type-btn {
+    flex: 1;
+    height: 30px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 0.75rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .feedback-type-btn:hover { border-color: var(--accent); color: var(--text); }
+  .feedback-type-btn.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+
+  /* --- Footer --- */
+  .app-footer {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 16px;
+    padding: 8px 24px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    border-top: 1px solid var(--border-light);
+    flex-shrink: 0;
+  }
+  .app-footer a { color: var(--accent); text-decoration: none; }
+  .app-footer a:hover { text-decoration: underline; }
+
+  /* --- Queue --- */
+  .queue-input { margin-bottom: 16px; }
+
+  .queue-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .queue-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: #1a1612;
+    border: 1px solid #2a2520;
+    border-radius: 10px;
+    transition: transform 0.3s cubic-bezier(0.4,0,0.2,1), opacity 0.3s, box-shadow 0.2s;
+    position: relative;
+  }
+  .queue-item.processing {
+    border-color: #b48c3c;
+    background: #231e18;
+  }
+  .queue-item.paused {
+    border-color: #8a7e6b;
+    opacity: 0.7;
+  }
+  .queue-item.dragging {
+    opacity: 0.5;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  }
+  .queue-item.drag-over {
+    border-top: 2px solid #b48c3c;
+  }
+
+  .queue-drag-handle {
+    cursor: grab;
+    color: #4a3f35;
+    font-size: 1.1rem;
+    user-select: none;
+    flex-shrink: 0;
+    width: 16px;
+    text-align: center;
+  }
+  .queue-drag-handle:active { cursor: grabbing; }
+
+  .queue-item-icon {
+    flex-shrink: 0;
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.9rem;
+  }
+
+  .queue-pie {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: conic-gradient(#b48c3c var(--pct, 0%), #2a2520 var(--pct, 0%));
+    position: relative;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .queue-pie::after {
+    content: '';
+    position: absolute;
+    inset: 5px;
+    border-radius: 50%;
+    background: #1a1612;
+  }
+  .queue-pie-pct {
+    position: relative;
+    z-index: 1;
+    font-size: 0.55rem;
+    font-weight: 700;
+    color: #b48c3c;
+  }
+
+  .queue-item-info {
+    flex: 1;
+    min-width: 0;
+  }
+  .queue-item-title {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #e8d5a3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .queue-item-meta {
+    font-size: 0.72rem;
+    color: #8a7e6b;
+    margin-top: 2px;
+  }
+
+  .queue-progress {
+    height: 3px;
+    background: #2a2520;
+    border-radius: 2px;
+    margin-top: 4px;
+    overflow: hidden;
+  }
+  .queue-progress-fill {
+    height: 100%;
+    background: #b48c3c;
+    border-radius: 2px;
+    transition: width 0.5s;
+  }
+
+  .queue-item-actions {
+    flex-shrink: 0;
+    display: flex;
+    gap: 4px;
+  }
+  .queue-action-btn {
+    background: none;
+    border: none;
+    color: #6b6050;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    transition: color 0.2s, background 0.2s;
+    display: flex;
+    align-items: center;
+  }
+  .queue-action-btn:hover { color: #e8d5a3; background: rgba(255,255,255,0.05); }
+  .queue-action-btn.remove:hover { color: #e07050; }
+
   .hidden { display: none !important; }
 </style>
 </head>
@@ -940,23 +1544,20 @@
 <div id="app">
   <div class="header">
     <img src="/static/logo.png" alt="Baretraks" class="logo" />
-    <p class="subtitle">Strip. Sing. Share.</p>
+    <span class="header-tagline">A Community Jukebox for Music Without Borders<br><span class="header-tagline-sub">Queue it. Sing it. Understand it.</span></span>
+    <div style="flex:1;"></div>
+    <div class="header-actions" id="header-actions"></div>
   </div>
 
-  <!-- NAV -->
-  <div class="nav">
-    <button class="nav-btn active" data-page="generator" onclick="showPage('generator')">Production</button>
-    <button class="nav-btn" data-page="library" onclick="showPage('library')">Library</button>
-  </div>
+  <div class="split-pane" id="split-pane">
 
-  <!-- === GENERATOR PAGE === -->
-  <div id="page-generator">
-
-    <!-- IDLE STATE -->
-    <div id="state-idle" class="card">
+  <!-- === PRODUCTION PANE === -->
+  <div class="pane-production" id="pane-production">
+    <!-- Queue Input -->
+    <div class="queue-input">
       <div class="input-row">
-        <input type="text" id="url-input" placeholder="https://www.youtube.com/watch?v=..." />
-        <button class="btn-primary" id="btn-submit" onclick="submitJob()">Generate</button>
+        <input type="text" id="url-input" placeholder="YouTube URL..." onkeydown="if(event.key==='Enter')addToQueue()" />
+        <button class="btn-primary" id="btn-submit" onclick="addToQueue()">+ Add</button>
       </div>
       <div class="mode-row">
         <label><input type="radio" name="mode" value="karaoke" checked onchange="onModeChange()"> Karaoke Song</label>
@@ -1004,73 +1605,113 @@
       </div>
     </div>
 
-    <!-- PROCESSING STATE -->
-    <div id="state-processing" class="card hidden">
-      <div id="processing-title" class="player-title" style="margin-bottom:20px;"></div>
-      <div class="overall-bar-container">
-        <div class="overall-label">
-          <span>Overall progress</span>
-          <span id="overall-eta"></span>
-        </div>
-        <div class="overall-bar">
-          <div class="overall-bar-fill" id="overall-fill"></div>
-        </div>
-      </div>
-      <div class="processing-columns">
-        <div class="processing-left">
-          <div class="steps" id="steps-container"></div>
-        </div>
-        <div class="processing-right">
-          <h3 class="output-heading">Output Files</h3>
-          <div id="output-files" class="output-files">
-            <p class="output-placeholder">Files will appear here as each step completes.</p>
-          </div>
-        </div>
-      </div>
-      <p class="close-note" id="close-note">You can close this page — processing will continue in the background.</p>
-
-      <!-- Inline player (revealed when job completes) -->
-      <div id="inline-player" class="inline-player hidden">
-        <div class="inline-player-divider"></div>
-        <div class="tabs" id="tabs"></div>
-        <div class="player-area" id="player-area"></div>
-        <div class="lyrics-panel" id="lyrics-panel"></div>
-        <div style="text-align:center; margin-top:16px;">
-          <button class="btn-secondary" onclick="startNew()">Generate New</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- DONE STATE (kept for direct library navigation) -->
-    <div id="state-done" class="card hidden">
-      <div class="player-title" id="done-title"></div>
-      <div class="tabs" id="tabs-standalone"></div>
-      <div class="player-area" id="player-area-standalone"></div>
-      <div class="lyrics-panel" id="lyrics-panel-standalone"></div>
-      <div style="text-align:center; margin-top:16px;">
-        <button class="btn-secondary" onclick="startNew()">Generate New</button>
-      </div>
-    </div>
-
-    <!-- ERROR STATE -->
-    <div id="state-error" class="card hidden">
-      <div class="error-box">
-        <p id="error-msg"></p>
-      </div>
-      <div style="text-align:center; display:flex; gap:12px; justify-content:center;">
-        <button class="btn-primary" id="btn-resume" onclick="resumeJob()">Resume</button>
-        <button class="btn-secondary" onclick="startNew()">Start Over</button>
-      </div>
-    </div>
+    <!-- Queue List -->
+    <div class="queue-list" id="queue-list"></div>
 
   </div>
 
-  <!-- === LIBRARY PAGE === -->
-  <div id="page-library" class="hidden">
-    <div class="library-layout">
-      <div class="library-sidebar" id="library-sidebar"></div>
-      <div class="library-main" id="library-main"></div>
+  <!-- DIVIDER -->
+  <div class="pane-divider" id="pane-divider">
+    <button class="divider-btn" onclick="expandLibrary()" title="Toggle Production">&#9654;</button>
+  </div>
+
+  <!-- === LIBRARY PANE === -->
+  <div class="pane-library" id="pane-library">
+    <div class="library-header">
+      <div id="library-header-tabs"></div>
+      <div id="library-filter-bar" class="library-filter-bar" style="flex:1;"></div>
     </div>
+    <div id="library-main"></div>
+  </div>
+
+  </div><!-- end split-pane -->
+
+  <div class="app-footer">
+    <span>Baretraks v1.0</span>
+    <a href="#" onclick="openFeedbackForm(); return false;">Bug Report & Feedback</a>
+  </div>
+</div>
+
+<!-- Feedback Modal -->
+<div id="feedback-overlay" class="player-overlay hidden" onclick="if(event.target===this)closeFeedback()">
+  <div class="player-overlay-content" style="max-width:500px;position:relative;">
+    <div class="player-overlay-actions">
+      <button class="player-overlay-close" onclick="closeFeedback()">&times;</button>
+    </div>
+    <h3 style="color:var(--text-bright);margin-bottom:16px;">Bug Report & Feedback</h3>
+    <form id="feedback-form" onsubmit="submitFeedback(event)">
+      <input type="hidden" id="feedback-subject" value="" />
+      <div style="display:flex;gap:6px;margin-bottom:14px;" id="feedback-type-btns">
+        <button type="button" class="feedback-type-btn" onclick="selectFeedbackType(this,'Bug Report')">Bug Report</button>
+        <button type="button" class="feedback-type-btn" onclick="selectFeedbackType(this,'Suggestion')">Suggestion</button>
+        <button type="button" class="feedback-type-btn" onclick="selectFeedbackType(this,'Question')">Question</button>
+        <button type="button" class="feedback-type-btn" onclick="selectFeedbackType(this,'Feedback')">Feedback</button>
+      </div>
+      <div style="margin-bottom:12px;">
+        <textarea id="feedback-desc" placeholder="Describe the issue or feedback..." required rows="5"
+                  style="width:100%;box-sizing:border-box;padding:10px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg-input);color:var(--text);font-family:inherit;font-size:0.85rem;resize:vertical;"></textarea>
+      </div>
+      <div style="margin-bottom:16px;">
+        <label style="font-size:0.8rem;color:var(--text-dim);">Screenshot (max 5MB)
+          <input type="file" id="feedback-file" accept="image/*" style="display:block;margin-top:4px;font-size:0.8rem;color:var(--text-dim);" />
+        </label>
+      </div>
+      <button type="submit" class="btn-primary" style="width:100%;height:36px;">Submit</button>
+    </form>
+  </div>
+</div>
+
+<!-- Settings Overlay -->
+<div id="settings-overlay" class="player-overlay hidden" onclick="if(event.target===this)closeSettings()">
+  <div class="player-overlay-content" style="max-width:450px;position:relative;">
+    <div class="player-overlay-actions">
+      <button class="player-overlay-close" onclick="closeSettings()">&times;</button>
+    </div>
+    <h3 style="color:var(--text-bright);margin-bottom:24px;">Settings</h3>
+
+    <div style="margin-bottom:24px;">
+      <label style="font-size:0.75rem;color:var(--text-dim);font-weight:600;text-transform:uppercase;letter-spacing:0.08em;display:block;margin-bottom:10px;">Theme</label>
+      <div style="display:flex;gap:8px;" id="settings-theme-btns"></div>
+    </div>
+
+    <div style="margin-bottom:8px;">
+      <label style="font-size:0.75rem;color:var(--text-dim);font-weight:600;text-transform:uppercase;letter-spacing:0.08em;display:block;margin-bottom:10px;">Display Mode</label>
+      <div style="display:flex;gap:8px;" id="settings-mode-btns"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Admin Overlay -->
+<div id="admin-overlay" class="player-overlay hidden" onclick="if(event.target===this)closeAdmin()">
+  <div class="player-overlay-content" style="max-width:700px;position:relative;">
+    <div class="player-overlay-actions">
+      <button class="player-overlay-close" onclick="closeAdmin()">&times;</button>
+    </div>
+    <h3 style="color:var(--text-bright);margin-bottom:20px;">Admin Panel</h3>
+    <div style="margin-bottom:24px;">
+      <h4 style="color:var(--text-dim);font-size:0.8rem;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:8px;">Users</h4>
+      <div id="admin-users" style="background:var(--bg-input);border:1px solid var(--border);border-radius:10px;max-height:300px;overflow-y:auto;"></div>
+    </div>
+    <div>
+      <h4 style="color:var(--text-dim);font-size:0.8rem;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:8px;">Feedback & Bug Reports</h4>
+      <div id="admin-feedback" style="background:var(--bg-input);border:1px solid var(--border);border-radius:10px;max-height:300px;overflow-y:auto;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Player Overlay -->
+<div id="player-overlay" class="player-overlay hidden" onclick="if(event.target===this)closePlayer()">
+  <div class="player-overlay-content">
+    <div class="player-overlay-actions">
+      <button class="player-overlay-share" id="btn-share" onclick="sharePlayer()" title="Copy link">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+      </button>
+      <button class="player-overlay-close" onclick="closePlayer()">&times;</button>
+    </div>
+    <div class="player-title" id="overlay-title"></div>
+    <div class="tabs" id="overlay-tabs"></div>
+    <div class="player-area" id="overlay-player-area"></div>
+    <div class="lyrics-panel" id="overlay-lyrics-panel"></div>
   </div>
 </div>
 
@@ -1093,9 +1734,9 @@ let pollInterval = null;
 let currentJob = null;
 let lyricsData = null;
 let activeMediaEl = null;
-let currentPage = 'generator';
+let paneState = 'default'; // 'default' (30/70) | 'lib-expanded' (0/100)
 
-// ---- Page navigation ----
+// ---- Pane navigation ----
 
 function stopAllMedia() {
   if (activeMediaEl) {
@@ -1111,41 +1752,281 @@ function stopAllMedia() {
   if (typeof destroyYtPlayer === 'function') destroyYtPlayer();
 }
 
-function showPage(page) {
+function closePlayer() {
+  const overlay = document.getElementById('player-overlay');
+  if (!overlay || overlay.classList.contains('hidden')) return;
   stopAllMedia();
-  destroyYtPlayer();
-  currentPage = page;
-  document.querySelectorAll('.nav-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.page === page);
-  });
-  document.getElementById('page-generator').classList.toggle('hidden', page !== 'generator');
-  document.getElementById('page-library').classList.toggle('hidden', page !== 'library');
-  document.getElementById('app').classList.toggle('wide', page === 'library');
+  overlay.classList.add('hidden');
+  if (window.location.hash.startsWith('#/watch/')) {
+    history.replaceState(null, '', window.location.pathname);
+  }
+  document.getElementById('overlay-title').textContent = '';
+  document.getElementById('overlay-tabs').innerHTML = '';
+  document.getElementById('overlay-player-area').innerHTML = '';
+  document.getElementById('overlay-lyrics-panel').innerHTML = '';
+}
 
-  if (page === 'generator') showState('idle');
-  if (page === 'library') loadLibrary();
+function expandProduction() {
+  // Show production pane (back to default 30/70)
+  const el = document.getElementById('split-pane');
+  paneState = 'default';
+  el.className = 'split-pane';
+}
+
+function expandLibrary() {
+  // Hide production pane (0/100)
+  const el = document.getElementById('split-pane');
+  paneState = paneState === 'lib-expanded' ? 'default' : 'lib-expanded';
+  el.className = 'split-pane' + (paneState !== 'default' ? ' ' + paneState : '');
 }
 
 // ---- State management ----
 
-function showState(state) {
-  stopAllMedia();
-  ['idle', 'processing', 'done', 'error'].forEach(s => {
-    document.getElementById('state-' + s).classList.toggle('hidden', s !== state);
-  });
-  document.getElementById('app').classList.toggle('wide',
-    state === 'processing' || currentPage === 'library');
+// ---- Queue State ----
+let productionQueue = [];
+let queuePollInterval = null;
+
+function startQueuePolling() {
+  if (queuePollInterval) return;
+  queuePollInterval = setInterval(pollQueue, 2000);
+  pollQueue();
 }
 
-function startNew() {
-  stopAllMedia();
-  currentJob = null;
-  lyricsData = null;
-  // Reset inline player
-  document.getElementById('inline-player').classList.add('hidden');
-  document.getElementById('close-note').classList.remove('hidden');
-  document.getElementById('url-input').value = '';
-  showState('idle');
+function stopQueuePolling() {
+  if (queuePollInterval) { clearInterval(queuePollInterval); queuePollInterval = null; }
+}
+
+async function pollQueue() {
+  try {
+    const resp = await fetch('/api/queue');
+    const data = await resp.json();
+    const oldProcessingId = productionQueue.find(i => i.status === 'processing')?.id;
+    productionQueue = data.queue || [];
+    currentJob = data.job || null;
+    renderQueue();
+
+    // If a processing item just finished, refresh library
+    const newProcessingId = productionQueue.find(i => i.status === 'processing')?.id;
+    if (oldProcessingId && oldProcessingId !== newProcessingId) {
+      loadLibrary();
+    }
+
+    // Stop polling if queue is empty
+    if (productionQueue.length === 0) stopQueuePolling();
+  } catch (e) {}
+}
+
+async function addToQueue() {
+  const url = document.getElementById('url-input').value.trim();
+  if (!url) return;
+  if (!/youtube\.com\/watch|youtu\.be\//.test(url)) {
+    alert('Please enter a valid YouTube URL');
+    return;
+  }
+
+  const mode = getSelectedMode();
+  const languages = mode === 'subtitled' ? [...selectedLanguages] : [];
+  if (mode === 'subtitled' && languages.length === 0) {
+    alert('Please add at least one subtitle language.');
+    return;
+  }
+
+  const btn = document.getElementById('btn-submit');
+  btn.disabled = true;
+  btn.textContent = 'Adding...';
+
+  try {
+    const body = { url, mode };
+    if (languages.length > 0) body.languages = languages;
+    const resp = await fetch('/api/queue', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) throw new Error('Failed to add to queue');
+    const data = await resp.json();
+    productionQueue = data.queue || [];
+    renderQueue();
+    document.getElementById('url-input').value = '';
+    startQueuePolling();
+  } catch (e) {
+    alert('Error: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '+ Add';
+  }
+}
+
+async function startQueue() {
+  try {
+    await fetch('/api/queue/start', { method: 'POST' });
+    startQueuePolling();
+    pollQueue();
+  } catch (e) {}
+}
+
+async function removeQueueItem(itemId) {
+  try {
+    const resp = await fetch(`/api/queue/${itemId}`, { method: 'DELETE' });
+    const data = await resp.json();
+    productionQueue = data.queue || [];
+    renderQueue();
+  } catch (e) {}
+}
+
+async function pauseQueueItem(itemId) {
+  try {
+    await fetch(`/api/queue/${itemId}/pause`, { method: 'POST' });
+  } catch (e) {}
+}
+
+async function resumeQueueItem(itemId) {
+  try {
+    await fetch(`/api/queue/${itemId}/resume`, { method: 'POST' });
+    startQueuePolling();
+  } catch (e) {}
+}
+
+function renderQueue() {
+  const list = document.getElementById('queue-list');
+  if (productionQueue.length === 0) {
+    list.innerHTML = '<p style="color:#4a3f35;font-size:0.8rem;text-align:center;margin-top:20px;">Queue is empty. Add a URL above to get started.</p>';
+    return;
+  }
+
+  list.innerHTML = productionQueue.map((item, i) => {
+    const isProcessing = item.status === 'processing';
+    const isPaused = item.status === 'paused';
+    const isFailed = item.status === 'failed';
+    const isQueued = item.status === 'queued';
+
+    const modeLabel = item.mode === 'subtitled'
+      ? 'Subtitled' + (item.languages?.length ? ' · ' + item.languages.map(c => LANG_NAMES_ALL[c] || c).join(', ') : '')
+      : 'Karaoke';
+
+    let statusLine = modeLabel;
+    if (isProcessing && item.step_name) {
+      const totalSteps = item.mode === 'subtitled' ? STEP_NAMES_SUBTITLED.length : STEP_NAMES_KARAOKE.length;
+      const stepNum = item.step || 0;
+      statusLine = stepNum > 0 ? `${stepNum}/${totalSteps} ${item.step_name}` : item.step_name;
+    }
+    if (isPaused) statusLine = 'Paused — ' + modeLabel;
+    if (isFailed) statusLine = 'Failed';
+
+    let icon = '';
+    if (isProcessing) {
+      const totalSteps = item.mode === 'subtitled' ? STEP_NAMES_SUBTITLED.length : STEP_NAMES_KARAOKE.length;
+      const stepNum = item.step || 0;
+      const stepProg = item.step_progress || 0;
+      const overallPct = totalSteps > 0 ? Math.round(((stepNum - 1 + stepProg) / totalSteps) * 100) : 0;
+      icon = `<div class="queue-pie" style="--pct:${Math.max(overallPct, 2)}%"><span class="queue-pie-pct">${overallPct}%</span></div>`;
+    } else if (isPaused) {
+      icon = '&#9646;&#9646;';
+    } else if (isFailed) {
+      icon = '!';
+    }
+
+    const dragHandle = isQueued
+      ? '<div class="queue-drag-handle" title="Drag to reorder">&#8801;</div>'
+      : '<div style="width:16px;"></div>';
+
+    let progressBar = '';
+    if (isProcessing) {
+      const totalSteps = item.mode === 'subtitled' ? STEP_NAMES_SUBTITLED.length : STEP_NAMES_KARAOKE.length;
+      const stepNum = item.step || 0;
+      const stepProg = item.step_progress || 0;
+      const barPct = totalSteps > 0 ? Math.round(((stepNum - 1 + stepProg) / totalSteps) * 100) : 0;
+      progressBar = `<div class="queue-progress"><div class="queue-progress-fill" style="width:${Math.max(barPct, 2)}%"></div></div>`;
+    }
+
+    const noneProcessing = !productionQueue.some(q => q.status === 'processing');
+    const isTopQueued = isQueued && i === productionQueue.findIndex(q => q.status === 'queued');
+
+    let actions = '';
+    if (isProcessing) {
+      actions = `<button class="queue-action-btn" onclick="pauseQueueItem('${item.id}')" title="Pause">&#9208;</button>`;
+    } else if (isPaused) {
+      actions = `<button class="queue-action-btn" onclick="resumeQueueItem('${item.id}')" title="Resume">&#9654;</button>`;
+    } else if (isTopQueued && noneProcessing) {
+      actions = `<button class="queue-action-btn" onclick="startQueue()" title="Start" style="color:var(--accent);">&#9654;</button>`;
+    }
+    if (!isProcessing) {
+      actions += `<button class="queue-action-btn remove" onclick="removeQueueItem('${item.id}')" title="Remove">&times;</button>`;
+    }
+
+    return `
+      <div class="queue-item ${item.status}" draggable="${isQueued}" data-id="${item.id}" data-index="${i}"
+           ondragstart="onQueueDragStart(event)" ondragover="onQueueDragOver(event)" ondrop="onQueueDrop(event)" ondragend="onQueueDragEnd(event)" ondragleave="onQueueDragLeave(event)">
+        ${dragHandle}
+        <div class="queue-item-icon">${icon}</div>
+        <div class="queue-item-info">
+          <div class="queue-item-title">${escapeHtml(item.title || 'Loading...')}</div>
+          <div class="queue-item-meta">${statusLine}${item.added_by ? ' &middot; ' + escapeHtml(item.added_by) : ''}</div>
+          ${progressBar}
+        </div>
+        <div class="queue-item-actions">${actions}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+// ---- Queue Drag and Drop ----
+
+let _draggedIndex = null;
+
+function onQueueDragStart(e) {
+  const item = e.currentTarget;
+  _draggedIndex = parseInt(item.dataset.index);
+  item.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', _draggedIndex);
+}
+
+function onQueueDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  const item = e.currentTarget;
+  const idx = parseInt(item.dataset.index);
+  // Don't allow dropping on the processing item
+  if (productionQueue[idx]?.status === 'processing') return;
+  // Remove drag-over from all items
+  document.querySelectorAll('.queue-item.drag-over').forEach(el => el.classList.remove('drag-over'));
+  if (idx !== _draggedIndex) item.classList.add('drag-over');
+}
+
+function onQueueDragLeave(e) {
+  e.currentTarget.classList.remove('drag-over');
+}
+
+function onQueueDragEnd(e) {
+  e.currentTarget.classList.remove('dragging');
+  document.querySelectorAll('.queue-item.drag-over').forEach(el => el.classList.remove('drag-over'));
+  _draggedIndex = null;
+}
+
+async function onQueueDrop(e) {
+  e.preventDefault();
+  const targetIndex = parseInt(e.currentTarget.dataset.index);
+  e.currentTarget.classList.remove('drag-over');
+
+  if (_draggedIndex === null || _draggedIndex === targetIndex) return;
+  if (productionQueue[targetIndex]?.status === 'processing') return;
+
+  // Reorder locally for instant feedback
+  const [moved] = productionQueue.splice(_draggedIndex, 1);
+  productionQueue.splice(targetIndex, 0, moved);
+  renderQueue();
+
+  // Sync with server
+  const order = productionQueue.map(item => item.id);
+  try {
+    await fetch('/api/queue/reorder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order }),
+    });
+  } catch (e) {}
+  _draggedIndex = null;
 }
 
 // ---- Mode & Language Selection ----
@@ -1185,7 +2066,7 @@ function renderLangChips() {
   addSelect.style.display = selectedLanguages.length >= MAX_LANGUAGES ? 'none' : '';
 }
 
-// ---- Submit Job ----
+// ---- Legacy (kept for compatibility) ----
 
 async function submitJob(skipDuplicateCheck = false) {
   const url = document.getElementById('url-input').value.trim();
@@ -1301,7 +2182,16 @@ function showProcessing() {
   STEP_NAMES = jobMode === 'subtitled' ? STEP_NAMES_SUBTITLED : STEP_NAMES_KARAOKE;
   const titleEl = document.getElementById('processing-title');
   titleEl.textContent = currentJob.title || 'Processing...';
-  renderSteps();
+
+  // Only re-render steps if not already rendered (avoids flicker on nav back)
+  const container = document.getElementById('steps-container');
+  if (!container.children.length) {
+    renderSteps();
+  }
+
+  // Immediately reflect current progress (no flash of "pending")
+  updateProgress();
+
   if (pollInterval) clearInterval(pollInterval);
   pollInterval = setInterval(pollJob, 2000);
   pollJob();
@@ -1545,6 +2435,8 @@ let _subtitledJobId = null;
 function renderSubtitledPlayer(jobId, youtubeUrl, languages) {
   destroyYtPlayer();
   _subtitledJobId = jobId;
+  _currentSubLangs = languages || [];
+  _currentSubLangIdx = 0;
   const videoId = extractVideoId(youtubeUrl);
   if (!videoId) return;
 
@@ -1557,7 +2449,7 @@ function renderSubtitledPlayer(jobId, youtubeUrl, languages) {
   ).join('');
 
   const langSelector = languages.length > 1
-    ? `<select id="subtitle-lang-select" onchange="switchSubtitleLang(this.value)" style="padding:3px 6px;border-radius:6px;border:1px solid rgba(74,63,47,0.6);background:rgba(26,22,18,0.85);color:#d4c8b0;font-size:0.8rem;font-family:inherit;cursor:pointer;">${langOptions}</select>`
+    ? `<button onclick="cycleSubtitleLang()" style="padding:3px 10px;border-radius:6px;border:1px solid rgba(74,63,47,0.6);background:rgba(26,22,18,0.85);color:#d4c8b0;font-size:0.8rem;font-family:inherit;cursor:pointer;" id="subtitle-lang-btn">${LANG_NAMES_ALL[languages[0]] || languages[0]}</button>`
     : (languages.length === 1 ? `<span class="toggle-label">${LANG_NAMES_ALL[languages[0]] || languages[0]}</span>` : '');
 
   // Download links
@@ -1608,6 +2500,18 @@ function renderSubtitledPlayer(jobId, youtubeUrl, languages) {
   }
 }
 
+let _currentSubLangs = [];
+let _currentSubLangIdx = 0;
+
+function cycleSubtitleLang() {
+  if (_currentSubLangs.length <= 1) return;
+  _currentSubLangIdx = (_currentSubLangIdx + 1) % _currentSubLangs.length;
+  const lang = _currentSubLangs[_currentSubLangIdx];
+  switchSubtitleLang(lang);
+  const btn = document.getElementById('subtitle-lang-btn');
+  if (btn) btn.textContent = LANG_NAMES_ALL[lang] || lang;
+}
+
 function switchSubtitleLang(langCode, skipSync) {
   if (!_subtitledJobId) return;
   fetch(`/api/jobs/${_subtitledJobId}/subtitles/${langCode}`)
@@ -1619,6 +2523,16 @@ function switchSubtitleLang(langCode, skipSync) {
       if (overlay) overlay.textContent = '';
     })
     .catch(() => { subtitleCues = []; });
+}
+
+function toggleKaraokeFullscreen() {
+  const container = document.getElementById('karaoke-video-container');
+  if (!container) return;
+  if (document.fullscreenElement) {
+    document.exitFullscreen();
+  } else {
+    container.requestFullscreen();
+  }
 }
 
 function toggleYtFullscreen() {
@@ -1716,52 +2630,28 @@ async function resumeJob() {
 // ---- Done State: Media Player ----
 
 // Track which DOM container set the player is using
-let playerMode = 'inline'; // 'inline' or 'standalone'
+let playerMode = 'inline'; // 'inline' or 'overlay'
 
 function _tabsEl() {
-  return document.getElementById(playerMode === 'inline' ? 'tabs' : 'tabs-standalone');
+  if (playerMode === 'overlay') return document.getElementById('overlay-tabs');
+  return document.getElementById('tabs');
 }
 function _playerAreaEl() {
-  return document.getElementById(playerMode === 'inline' ? 'player-area' : 'player-area-standalone');
+  if (playerMode === 'overlay') return document.getElementById('overlay-player-area');
+  return document.getElementById('player-area');
 }
 function _lyricsPanelEl() {
-  return document.getElementById(playerMode === 'inline' ? 'lyrics-panel' : 'lyrics-panel-standalone');
+  if (playerMode === 'overlay') return document.getElementById('overlay-lyrics-panel');
+  return document.getElementById('lyrics-panel');
 }
 
 async function showInlinePlayer(jobId) {
-  playerMode = 'inline';
-
-  // Hide the close note, show the player section
-  document.getElementById('close-note').classList.add('hidden');
-  document.getElementById('inline-player').classList.remove('hidden');
-
-  const jobMode = currentJob.mode || 'karaoke';
-
-  if (jobMode === 'subtitled') {
-    // Subtitled mode: YouTube embed with overlay
-    _tabsEl().innerHTML = '';
-    _lyricsPanelEl().innerHTML = '';
-    renderSubtitledPlayer(jobId, currentJob.url, currentJob.languages || (currentJob.language ? [currentJob.language] : []));
-    return;
-  }
-
-  // Load lyrics
-  try {
-    const resp = await fetch(`/api/jobs/${jobId}/lyrics`);
-    lyricsData = await resp.json();
-  } catch (e) {
-    lyricsData = [];
-  }
-
-  renderTabs(jobId);
-  switchTab('video', jobId);
+  // Processing complete — navigate to Watch page
+  await showPlayerForJob(jobId);
 }
 
 async function showPlayerForJob(jobId) {
-  playerMode = 'standalone';
-
-  // Clean up any existing YouTube player
-  destroyYtPlayer();
+  playerMode = 'overlay';
 
   // Load job info if we don't have it or it's a different job
   if (!currentJob || currentJob.id !== jobId) {
@@ -1781,18 +2671,23 @@ async function showPlayerForJob(jobId) {
     }
   }
 
-  showPage('generator');
-  showState('done');
+  // Show the overlay and set URL hash for sharing
+  document.getElementById('player-overlay').classList.remove('hidden');
+  window.location.hash = `/watch/${jobId}`;
 
   const jobMode = currentJob.mode || 'karaoke';
-  document.getElementById('done-title').textContent = currentJob.title || (jobMode === 'subtitled' ? 'Subtitled Video' : 'Karaoke');
+  const titleEl = document.getElementById('overlay-title');
+  const item = libraryItems.find(i => i.id === jobId);
+  titleEl.innerHTML = `
+    <span>${escapeHtml(currentJob.title || (jobMode === 'subtitled' ? 'Subtitled Video' : 'Karaoke'))}</span>
+    <span class="vote-controls" data-vote-id="${jobId}" style="margin-left:12px;">
+      ${renderVoteControls(jobId, item?.upvotes || 0, item?.downvotes || 0, item?.user_vote || 0)}
+    </span>
+  `;
 
   if (jobMode === 'subtitled') {
-    // Subtitled mode: YouTube embed with overlay — no tabs, no lyrics panel
-    const tabsEl = document.getElementById('tabs-standalone');
-    const lyricsEl = document.getElementById('lyrics-panel-standalone');
-    tabsEl.innerHTML = '';
-    lyricsEl.innerHTML = '';
+    _tabsEl().innerHTML = '';
+    _lyricsPanelEl().innerHTML = '';
     renderSubtitledPlayer(jobId, currentJob.url, currentJob.languages || (currentJob.language ? [currentJob.language] : []));
     return;
   }
@@ -1857,7 +2752,7 @@ function switchTab(tab, jobId) {
 
   if (tab === 'video') {
     area.innerHTML = `
-      <div class="video-container">
+      <div class="video-container" id="karaoke-video-container">
         <video id="media-el" controls preload="metadata" src="/api/jobs/${id}/video"></video>
         <div class="vocal-toggle">
           <label class="toggle-switch" title="Toggle vocals">
@@ -1866,6 +2761,9 @@ function switchTab(tab, jobId) {
           </label>
           <span class="toggle-label">Vocals</span>
         </div>
+        <button class="karaoke-fullscreen-btn" onclick="toggleKaraokeFullscreen()" title="Fullscreen">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+        </button>
       </div>
       <div class="tab-download">
         <a class="btn-download-sm" href="/api/jobs/${id}/download/karaoke.mp4">
@@ -2069,13 +2967,11 @@ function onTimeUpdate() {
 // ---- Library ----
 
 let libraryItems = [];
-let libraryFilters = { search: '', channels: new Set(), categories: new Set() };
+let libraryFilters = { search: '', channels: new Set(), categories: new Set(), types: new Set() };
 
 async function loadLibrary() {
-  const sidebar = document.getElementById('library-sidebar');
   const main = document.getElementById('library-main');
   main.innerHTML = '<p style="text-align:center; color:#8a7e6b;">Loading...</p>';
-  sidebar.innerHTML = '';
 
   try {
     const resp = await fetch('/api/library');
@@ -2083,102 +2979,86 @@ async function loadLibrary() {
     libraryItems = data.items || [];
 
     if (libraryItems.length === 0) {
-      sidebar.innerHTML = '';
+      document.getElementById('library-filter-bar').innerHTML = '';
       main.innerHTML = `
         <div class="library-empty">
           <p>No songs yet.</p>
-          <p style="margin-top:8px;">Generate your first karaoke video to see it here.</p>
+          <p style="margin-top:8px;">Generate your first video to see it here.</p>
         </div>
       `;
       return;
     }
 
-    libraryFilters = { search: '', channels: new Set(), categories: new Set() };
-    renderLibrarySidebar();
+    libraryFilters = { search: '', channels: new Set(), categories: new Set(), types: new Set() };
+    renderLibraryFilterBar();
     renderLibraryGrid();
   } catch (e) {
     main.innerHTML = '<p style="text-align:center; color:#e07050;">Failed to load library</p>';
   }
 }
 
-function renderLibrarySidebar() {
-  const sidebar = document.getElementById('library-sidebar');
+function renderLibraryFilterBar() {
+  const bar = document.getElementById('library-filter-bar');
 
   // Collect facets
   const channelCounts = {};
-  const categoryCounts = {};
+  const typeCounts = {};
   for (const item of libraryItems) {
     if (item.channel) channelCounts[item.channel] = (channelCounts[item.channel] || 0) + 1;
-    for (const cat of (item.categories || [])) {
-      categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
-    }
+    const type = (item.mode || 'karaoke') === 'subtitled' ? 'Subtitled' : 'Karaoke';
+    typeCounts[type] = (typeCounts[type] || 0) + 1;
   }
 
-  let html = `
-    <div class="filter-section">
-      <div class="filter-heading">Search</div>
-      <input class="filter-search" type="text" placeholder="Search songs..."
-             value="${escapeHtml(libraryFilters.search)}"
-             oninput="libraryFilters.search=this.value; renderLibraryGrid()" />
-    </div>
+  const channels = Object.keys(channelCounts).sort();
+  const types = Object.keys(typeCounts).sort();
+
+  // Type tabs in header row
+  const tabsEl = document.getElementById('library-header-tabs');
+  const activeType = libraryFilters.types.size === 1 ? [...libraryFilters.types][0] : '';
+  const libraryActive = activeType === '';
+  const typeTabs = types.map(t => {
+    const isActive = t === activeType;
+    return `<span class="divider-pipe">|</span><button class="filter-tab ${isActive ? 'active' : ''}" onclick="setFilterType('${t}'); renderLibraryFilterBar(); renderLibraryGrid()">${t.toUpperCase()}</button>`;
+  }).join('');
+  tabsEl.innerHTML = `
+    <div class="library-tabs">
+      <button class="filter-tab library-tab ${libraryActive ? 'active' : ''}" onclick="setFilterType(''); renderLibraryFilterBar(); renderLibraryGrid()">LIBRARY</button>
+      ${types.length > 0 ? typeTabs : ''}
+    </div>`;
+
+  // Channel dropdown + search
+  const channelOpts = channels.length > 1
+    ? `<select onchange="setFilterChannel(this.value); renderLibraryGrid()">
+         <option value="">All channels</option>
+         ${channels.map(ch => `<option value="${escapeHtml(ch)}" ${libraryFilters.channels.has(ch) ? 'selected' : ''}>${escapeHtml(ch)}</option>`).join('')}
+       </select>` : '';
+
+  bar.innerHTML = `
+    <input type="text" placeholder="Search..." value="${escapeHtml(libraryFilters.search)}"
+           oninput="libraryFilters.search=this.value; renderLibraryGrid()" />
+    ${channelOpts}
   `;
+}
 
-  // Channel facet
-  const channels = Object.entries(channelCounts).sort((a, b) => b[1] - a[1]);
-  if (channels.length > 0) {
-    html += `<div class="filter-section">
-      <div class="filter-heading">Channel</div>
-      <div class="filter-options">`;
-    for (const [ch, count] of channels) {
-      const active = libraryFilters.channels.has(ch);
-      html += `
-        <div class="filter-option ${active ? 'active' : ''}" onclick="toggleFilter('channels','${escapeHtml(ch)}')">
-          <div class="filter-check"></div>
-          <span class="filter-name" title="${escapeHtml(ch)}">${escapeHtml(ch)}</span>
-          <span class="filter-count">${count}</span>
-        </div>`;
-    }
-    html += `</div></div>`;
-  }
+function setFilterType(val) {
+  libraryFilters.types = val ? new Set([val]) : new Set();
+}
 
-  // Category facet
-  const categories = Object.entries(categoryCounts).sort((a, b) => b[1] - a[1]);
-  if (categories.length > 0) {
-    html += `<div class="filter-section">
-      <div class="filter-heading">Category</div>
-      <div class="filter-options">`;
-    for (const [cat, count] of categories) {
-      const active = libraryFilters.categories.has(cat);
-      html += `
-        <div class="filter-option ${active ? 'active' : ''}" onclick="toggleFilter('categories','${escapeHtml(cat)}')">
-          <div class="filter-check"></div>
-          <span class="filter-name">${escapeHtml(cat)}</span>
-          <span class="filter-count">${count}</span>
-        </div>`;
-    }
-    html += `</div></div>`;
-  }
-
-  // Clear filters
-  const hasFilters = libraryFilters.search || libraryFilters.channels.size || libraryFilters.categories.size;
-  if (hasFilters) {
-    html += `<a class="filter-clear" href="#" onclick="clearFilters(); return false;">Clear all filters</a>`;
-  }
-
-  sidebar.innerHTML = html;
+function setFilterChannel(val) {
+  libraryFilters.channels = val ? new Set([val]) : new Set();
 }
 
 function toggleFilter(facet, value) {
   const set = libraryFilters[facet];
   if (set.has(value)) set.delete(value);
   else set.add(value);
-  renderLibrarySidebar();
+  renderLibraryFilterBar();
   renderLibraryGrid();
 }
 
 function clearFilters() {
-  libraryFilters = { search: '', channels: new Set(), categories: new Set() };
-  renderLibrarySidebar();
+  libraryFilters = { search: '', channels: new Set(), categories: new Set(), types: new Set() };
+  renderLibraryFilterBar();
   renderLibraryGrid();
 }
 
@@ -2214,6 +3094,11 @@ function renderLibraryGrid() {
       const cats = item.categories || [];
       if (!cats.some(c => libraryFilters.categories.has(c))) return false;
     }
+    // Type filter
+    if (libraryFilters.types.size > 0) {
+      const type = (item.mode || 'karaoke') === 'subtitled' ? 'Subtitled' : 'Karaoke';
+      if (!libraryFilters.types.has(type)) return false;
+    }
     return true;
   });
 
@@ -2225,7 +3110,7 @@ function renderLibraryGrid() {
     return;
   }
 
-  const count = `<div class="library-results-count">${filtered.length} of ${libraryItems.length} songs</div>`;
+  const count = '';
   const grid = filtered.map(item => {
     const duration = item.audio_duration ? formatDuration(item.audio_duration) : '';
     const channel = item.channel ? escapeHtml(item.channel) : '';
@@ -2254,8 +3139,11 @@ function renderLibraryGrid() {
         <div class="library-info">
           <h3>${escapeHtml(item.title || 'Unknown')}</h3>
           ${channel ? `<div class="channel">${channel}</div>` : ''}
-          <span class="meta">${[duration, date].filter(Boolean).join(' &middot; ')}</span>
+          <span class="meta">${duration || ''} <span class="vote-controls-compact" data-vote-id="${item.id}">${renderVoteControlsCompact(item.id, item.upvotes, item.downvotes, item.user_vote)}</span></span>
         </div>
+        <button class="library-share-btn" onclick="event.stopPropagation(); shareLink('${item.id}')" title="Copy link">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+        </button>
       </div>
     `;
   }).join('');
@@ -2271,27 +3159,372 @@ function escapeHtml(str) {
 
 // ---- Init ----
 
-async function init() {
-  try {
-    const resp = await fetch('/api/jobs/current');
-    const data = await resp.json();
-    if (!data.job) return;
-    currentJob = data.job;
+// Close player overlay on Escape
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closePlayer();
+});
 
-    if (currentJob.status === 'running') {
-      showProcessing();
-    } else if (currentJob.status === 'done') {
-      // Just stay on idle — user can go to library or click generate
-    } else if (currentJob.status === 'failed') {
-      // Only show error for very recent failures (within last 60 seconds)
-      const failedAt = currentJob.finished_at ? new Date(currentJob.finished_at) : null;
-      const fiveMinAgo = new Date(Date.now() - 60 * 1000);
-      if (failedAt && failedAt > fiveMinAgo) {
-        showError(currentJob.error || 'Previous job failed. You can resume it.');
-      }
+// ---- Voting ----
+
+async function voteOnJob(jobId, value) {
+  if (!currentUser) { window.location.href = '/login'; return; }
+  try {
+    const resp = await fetch(`/api/jobs/${jobId}/vote`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value }),
+    });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    // Update the library item in memory
+    const item = libraryItems.find(i => i.id === jobId);
+    if (item) {
+      item.upvotes = data.upvotes;
+      item.downvotes = data.downvotes;
+      item.user_vote = data.user_vote;
+    }
+    // Re-render vote controls everywhere this job appears
+    document.querySelectorAll(`.vote-controls[data-vote-id="${jobId}"]`).forEach(el => {
+      el.innerHTML = renderVoteControls(jobId, data.upvotes, data.downvotes, data.user_vote);
+    });
+    document.querySelectorAll(`.vote-controls-compact[data-vote-id="${jobId}"]`).forEach(el => {
+      el.innerHTML = renderVoteControlsCompact(jobId, data.upvotes, data.downvotes, data.user_vote);
+    });
+  } catch (e) {}
+}
+
+function renderVoteControls(jobId, upvotes, downvotes, userVote) {
+  const net = (upvotes || 0) - (downvotes || 0);
+  return `
+    <button class="vote-btn ${userVote === 1 ? 'upvoted' : ''}" onclick="event.stopPropagation(); voteOnJob('${jobId}', 1)">&#9650;</button>
+    <span class="vote-count">${net}</span>
+    <button class="vote-btn ${userVote === -1 ? 'downvoted' : ''}" onclick="event.stopPropagation(); voteOnJob('${jobId}', -1)">&#9660;</button>
+  `;
+}
+
+function renderVoteControlsCompact(jobId, upvotes, downvotes, userVote) {
+  return `
+    <button class="vote-btn-sm ${userVote === 1 ? 'upvoted' : ''}" onclick="event.stopPropagation(); voteOnJob('${jobId}', 1)">&#9650;</button><span class="vote-count-sm">${upvotes || 0}</span>
+    <button class="vote-btn-sm ${userVote === -1 ? 'downvoted' : ''}" onclick="event.stopPropagation(); voteOnJob('${jobId}', -1)">&#9660;</button><span class="vote-count-sm">${downvotes || 0}</span>
+  `;
+}
+
+// ---- Sharing ----
+
+function shareLink(jobId) {
+  const url = window.location.origin + '/#/watch/' + jobId;
+  // Remove any existing share popup
+  const existing = document.getElementById('share-popup-overlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'share-popup-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:1000;';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+  overlay.innerHTML = `
+    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:24px;max-width:500px;width:90%;position:relative;">
+      <div class="player-overlay-actions"><button class="player-overlay-close" onclick="document.getElementById('share-popup-overlay').remove()">&times;</button></div>
+      <h4 style="color:var(--text-bright);margin-bottom:14px;font-size:0.95rem;">Share Link</h4>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="share-url-input" value="${url}" readonly onclick="this.select()"
+               style="flex:1;height:32px;padding:0 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-input);color:var(--text-bright);font-size:0.8rem;font-family:inherit;" />
+        <button id="share-copy-btn" onclick="copyShareLink()" class="btn-primary" style="height:32px;padding:0 20px;white-space:nowrap;">Copy</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+  document.getElementById('share-url-input').select();
+}
+
+function copyShareLink() {
+  const input = document.getElementById('share-url-input');
+  const btn = document.getElementById('share-copy-btn');
+  navigator.clipboard.writeText(input.value).then(() => {
+    btn.textContent = 'Copied!';
+    btn.style.opacity = '0.7';
+    setTimeout(() => {
+      const overlay = document.getElementById('share-popup-overlay');
+      if (overlay) overlay.remove();
+    }, 800);
+  }).catch(() => {
+    input.select();
+    document.execCommand('copy');
+    btn.textContent = 'Copied!';
+    setTimeout(() => {
+      const overlay = document.getElementById('share-popup-overlay');
+      if (overlay) overlay.remove();
+    }, 800);
+  });
+}
+
+function sharePlayer() {
+  const url = window.location.href;
+  navigator.clipboard.writeText(url).then(() => {
+    const btn = document.getElementById('btn-share');
+    const orig = btn.innerHTML;
+    btn.innerHTML = '<span style="font-size:0.8rem;color:#6b8f5e;">Copied!</span>';
+    setTimeout(() => { btn.innerHTML = orig; }, 1500);
+  }).catch(() => {
+    prompt('Copy this link:', url);
+  });
+}
+
+let currentUser = null;
+
+
+function renderUserMenu() {
+  const container = document.getElementById('header-actions');
+  if (!currentUser) { container.innerHTML = ''; return; }
+
+  const initials = (currentUser.name || currentUser.email || '?')
+    .split(/[\s@]/).filter(Boolean).slice(0, 2).map(s => s[0].toUpperCase()).join('');
+
+  const avatar = currentUser.picture_url
+    ? `<img src="${currentUser.picture_url}" alt="" />`
+    : initials;
+
+  const modeIcons = { dark: '&#9789;', day: '&#9788;', night: '&#9733;' };
+  const modeIcon = modeIcons[currentUser.dark_mode] || modeIcons.dark;
+
+  container.innerHTML = `
+    <button class="darkmode-toggle" onclick="cycleDarkMode()" title="Toggle dark mode">${modeIcon}</button>
+    <div class="user-menu" id="user-menu">
+      <div class="user-avatar" onclick="toggleUserMenu()">${avatar}</div>
+      <div class="user-dropdown" id="user-dropdown">
+        <div class="user-dropdown-header">${escapeHtml(currentUser.name || currentUser.email)}</div>
+        <div class="user-dropdown-divider"></div>
+        <button class="user-dropdown-item" onclick="openSettings()">Settings</button>
+        ${currentUser.role === 'admin' ? '<button class="user-dropdown-item" onclick="openAdminPanel()">Admin Panel</button>' : ''}
+        <div class="user-dropdown-divider"></div>
+        <button class="user-dropdown-item" onclick="logout()">Sign Out</button>
+      </div>
+    </div>
+  `;
+
+  // Apply current theme/mode
+  document.body.setAttribute('data-theme', currentUser.theme || 'retro');
+  document.body.setAttribute('data-mode', currentUser.dark_mode || 'dark');
+}
+
+function toggleUserMenu() {
+  const dd = document.getElementById('user-dropdown');
+  dd.classList.toggle('open');
+}
+
+// Close dropdown when clicking outside
+document.addEventListener('click', (e) => {
+  const menu = document.getElementById('user-menu');
+  const dd = document.getElementById('user-dropdown');
+  if (menu && dd && !menu.contains(e.target)) dd.classList.remove('open');
+});
+
+async function cycleDarkMode() {
+  const modes = ['dark', 'day', 'night'];
+  const current = currentUser.dark_mode || 'dark';
+  const next = modes[(modes.indexOf(current) + 1) % modes.length];
+  currentUser.dark_mode = next;
+  document.body.setAttribute('data-mode', next);
+  renderUserMenu();
+  await fetch('/api/auth/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dark_mode: next }),
+  });
+}
+
+async function setTheme(theme) {
+  currentUser.theme = theme;
+  document.body.setAttribute('data-theme', theme);
+  renderUserMenu();
+  await fetch('/api/auth/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ theme }),
+  });
+}
+
+async function logout() {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  window.location.href = '/login';
+}
+
+function openSettings() {
+  document.getElementById('settings-overlay').classList.remove('hidden');
+  document.getElementById('user-dropdown').classList.remove('open');
+  renderSettingsButtons();
+}
+
+function closeSettings() {
+  document.getElementById('settings-overlay').classList.add('hidden');
+}
+
+function renderSettingsButtons() {
+  const themes = [
+    { id: 'retro', label: 'Retro', desc: 'Warm browns & gold' },
+    { id: 'spotify', label: 'Spotify', desc: 'Dark with green' },
+    { id: 'disco', label: 'Disco', desc: 'Neon purple & pink' },
+  ];
+  const modes = [
+    { id: 'dark', label: 'Dark', icon: '&#9789;' },
+    { id: 'day', label: 'Day', icon: '&#9788;' },
+    { id: 'night', label: 'Night', icon: '&#9733;' },
+  ];
+
+  document.getElementById('settings-theme-btns').innerHTML = themes.map(t =>
+    `<button onclick="setTheme('${t.id}'); renderSettingsButtons();" style="flex:1;height:auto;padding:12px 8px;border-radius:10px;border:2px solid ${currentUser.theme===t.id?'var(--accent)':'var(--border)'};background:var(--bg-input);color:var(--text-bright);cursor:pointer;font-family:inherit;transition:border-color 0.2s;text-align:center;">
+      <div style="font-weight:600;font-size:0.85rem;">${t.label}</div>
+      <div style="font-size:0.65rem;color:var(--text-dim);margin-top:4px;">${t.desc}</div>
+    </button>`
+  ).join('');
+
+  document.getElementById('settings-mode-btns').innerHTML = modes.map(m =>
+    `<button onclick="cycleDarkModeTo('${m.id}'); renderSettingsButtons();" style="flex:1;height:auto;padding:12px 8px;border-radius:10px;border:2px solid ${currentUser.dark_mode===m.id?'var(--accent)':'var(--border)'};background:var(--bg-input);color:var(--text-bright);cursor:pointer;font-family:inherit;transition:border-color 0.2s;text-align:center;">
+      <div style="font-size:1.1rem;line-height:1;">${m.icon}</div>
+      <div style="font-size:0.75rem;margin-top:6px;">${m.label}</div>
+    </button>`
+  ).join('');
+}
+
+async function cycleDarkModeTo(mode) {
+  currentUser.dark_mode = mode;
+  document.body.setAttribute('data-mode', mode);
+  renderUserMenu();
+  await fetch('/api/auth/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dark_mode: mode }),
+  });
+}
+
+let _feedbackFormHTML = '';
+function openFeedbackForm() {
+  // Restore form if it was replaced by confirmation
+  if (_feedbackFormHTML) {
+    document.getElementById('feedback-form').innerHTML = _feedbackFormHTML;
+  } else {
+    _feedbackFormHTML = document.getElementById('feedback-form').innerHTML;
+  }
+  document.getElementById('feedback-overlay').classList.remove('hidden');
+}
+function closeFeedback() {
+  document.getElementById('feedback-overlay').classList.add('hidden');
+}
+function selectFeedbackType(btn, value) {
+  document.getElementById('feedback-subject').value = value;
+  document.querySelectorAll('.feedback-type-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+async function submitFeedback(e) {
+  e.preventDefault();
+  const formData = new FormData();
+  const subject = document.getElementById('feedback-subject').value;
+  if (!subject) { alert('Please select a type.'); return; }
+  formData.append('subject', subject);
+  formData.append('description', document.getElementById('feedback-desc').value);
+  const file = document.getElementById('feedback-file').files[0];
+  if (file) {
+    if (file.size > 5 * 1024 * 1024) { alert('Screenshot must be under 5MB.'); return; }
+    formData.append('screenshot', file);
+  }
+  try {
+    const resp = await fetch('/api/feedback', { method: 'POST', body: formData });
+    if (!resp.ok) throw new Error('Failed');
+    // Show confirmation in the same card
+    const form = document.getElementById('feedback-form');
+    form.innerHTML = `
+      <div style="text-align:center;padding:20px 0;">
+        <div style="font-size:2rem;margin-bottom:12px;">&#10003;</div>
+        <p style="color:var(--text-bright);font-size:1rem;margin-bottom:8px;">Thank you!</p>
+        <p style="color:var(--text-dim);font-size:0.85rem;">Your feedback has been submitted.</p>
+        <button class="btn-primary" style="margin-top:16px;width:auto;padding:8px 24px;" onclick="closeFeedback()">Close</button>
+      </div>
+    `;
+  } catch (err) { alert('Failed to submit feedback.'); }
+}
+
+async function openAdminPanel() {
+  document.getElementById('admin-overlay').classList.remove('hidden');
+  await loadAdminUsers();
+  await loadAdminFeedback();
+}
+
+function closeAdmin() {
+  document.getElementById('admin-overlay').classList.add('hidden');
+}
+
+async function loadAdminUsers() {
+  const container = document.getElementById('admin-users');
+  try {
+    const resp = await fetch('/api/admin/users');
+    const data = await resp.json();
+    container.innerHTML = data.users.map(u => `
+      <div style="display:flex;align-items:center;gap:12px;padding:10px;border-bottom:1px solid var(--border-light);font-size:0.85rem;">
+        <div style="flex:1;">
+          <strong style="color:var(--text-bright);">${escapeHtml(u.name)}</strong>
+          <span style="color:var(--text-dim);margin-left:8px;">${escapeHtml(u.email)}</span>
+        </div>
+        <span style="color:${u.role==='admin'?'var(--accent)':'var(--text-dim)'};font-size:0.75rem;font-weight:600;text-transform:uppercase;">${u.role}</span>
+      </div>
+    `).join('') || '<p style="color:var(--text-dim);padding:16px;">No users.</p>';
+  } catch (e) { container.innerHTML = '<p style="color:var(--error);">Failed to load users.</p>'; }
+}
+
+async function loadAdminFeedback() {
+  const container = document.getElementById('admin-feedback');
+  try {
+    const resp = await fetch('/api/admin/feedback');
+    const data = await resp.json();
+    container.innerHTML = data.feedback.map(fb => `
+      <div style="padding:10px;border-bottom:1px solid var(--border-light);font-size:0.85rem;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <strong style="color:var(--text-bright);">${escapeHtml(fb.subject)}</strong>
+          <span style="font-size:0.7rem;color:${fb.status==='new'?'var(--accent)':'var(--text-dim)'};text-transform:uppercase;">${fb.status}</span>
+        </div>
+        <p style="color:var(--text);margin:4px 0;">${escapeHtml(fb.description).substring(0, 200)}</p>
+        <span style="font-size:0.7rem;color:var(--text-muted);">${fb.user_name || fb.user_email || ''} &mdash; ${fb.created_at ? new Date(fb.created_at).toLocaleDateString() : ''}</span>
+      </div>
+    `).join('') || '<p style="color:var(--text-dim);padding:16px;">No feedback yet.</p>';
+  } catch (e) { container.innerHTML = '<p style="color:var(--error);">Failed to load feedback.</p>'; }
+}
+
+async function init() {
+  // Check for shared watch link — allow without login
+  const isSharedLink = window.location.hash.match(/^#\/watch\/(.+)$/);
+
+  // Load current user (optional for shared links)
+  try {
+    const authResp = await fetch('/api/auth/me');
+    if (authResp.ok) {
+      const authData = await authResp.json();
+      currentUser = authData.user;
+      renderUserMenu();
+    } else if (!isSharedLink) {
+      window.location.href = '/login';
+      return;
     }
   } catch (e) {
-    // Server not reachable — stay on idle
+    if (!isSharedLink) { window.location.href = '/login'; return; }
+  }
+
+  // Load both panes on startup (only if authenticated)
+  if (currentUser) loadLibrary();
+
+  // Load queue state
+  try {
+    const resp = await fetch('/api/queue');
+    const data = await resp.json();
+    productionQueue = data.queue || [];
+    currentJob = data.job || null;
+    renderQueue();
+    if (productionQueue.length > 0) startQueuePolling();
+  } catch (e) {}
+
+  // Check for hash-based deep link: #/watch/job-id
+  if (isSharedLink) {
+    await showPlayerForJob(isSharedLink[1]);
   }
 }
 

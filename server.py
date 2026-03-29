@@ -18,10 +18,18 @@ from pathlib import Path
 
 import imageio_ffmpeg
 import torch
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import Depends, FastAPI, HTTPException, Response
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from auth import (
+    create_token, create_user_with_permissions, get_current_user,
+    get_optional_user, hash_password, require_admin, verify_password,
+)
+from database import get_db
+from models import Feedback, User, UserPermissions, Vote
 
 import shutil
 
@@ -52,6 +60,10 @@ app = FastAPI()
 # ---------------------------------------------------------------------------
 _lock = threading.Lock()
 _job: dict | None = None
+_queue: list[dict] = []  # production queue [{id, url, mode, languages, title, thumbnail, channel, status}]
+_pause_requested = False
+_cancel_requested = False
+QUEUE_PATH = JOBS_DIR / "queue.json"
 # Learned multipliers: step -> ratio of step_duration / audio_duration
 _learned_multipliers: dict[int, float] = {}
 
@@ -106,6 +118,99 @@ def _save_stats(audio_duration: float, step_durations: dict) -> None:
     STATS_PATH.write_text(json.dumps(stats, indent=2))
     # Reload multipliers with new data
     _load_stats()
+
+def _save_queue() -> None:
+    """Persist queue to disk."""
+    JOBS_DIR.mkdir(parents=True, exist_ok=True)
+    QUEUE_PATH.write_text(json.dumps(_queue, default=str))
+
+
+def _load_queue() -> None:
+    """Load queue from disk."""
+    global _queue
+    if QUEUE_PATH.exists():
+        try:
+            _queue = json.loads(QUEUE_PATH.read_text())
+        except (json.JSONDecodeError, OSError):
+            _queue = []
+
+
+def _process_next_in_queue() -> None:
+    """Start processing the next queued item if nothing is running."""
+    global _job, _pause_requested
+    with _lock:
+        if _job is not None and _job.get("status") == "running":
+            return  # something already running
+        # Find the first "queued" item
+        next_item = None
+        for item in _queue:
+            if item.get("status") == "queued":
+                next_item = item
+                break
+        if not next_item:
+            return
+        next_item["status"] = "processing"
+    _pause_requested = False
+    _cancel_requested = False
+    _save_queue()
+
+    # Create the job from queue item
+    url = next_item["url"]
+    mode = next_item.get("mode", "karaoke")
+    languages = next_item.get("languages", [])
+    job_id = next_item["id"]
+    output_dir = JOBS_DIR / job_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    _job = {
+        "id": job_id,
+        "url": url,
+        "mode": mode,
+        "languages": languages,
+        "title": next_item.get("title", "Unknown"),
+        "thumbnail": next_item.get("thumbnail"),
+        "channel": next_item.get("channel"),
+        "upload_date": next_item.get("upload_date"),
+        "categories": next_item.get("categories", []),
+        "tags": next_item.get("tags", []),
+        "status": "running",
+        "step": 0,
+        "step_name": "Starting",
+        "step_progress": 0.0,
+        "started_at": _now_iso(),
+        "step_started_at": _now_iso(),
+        "finished_at": None,
+        "audio_duration": None,
+        "estimated_total": None,
+        "step_estimates": None,
+        "error": None,
+        "artifacts": {},
+        "output_dir": str(output_dir),
+    }
+    _save_job_json()
+
+    if mode == "subtitled":
+        thread = threading.Thread(
+            target=_run_subtitled_pipeline,
+            args=(job_id, url, output_dir, languages),
+            daemon=True)
+    else:
+        thread = threading.Thread(
+            target=_run_pipeline,
+            args=(job_id, url, output_dir),
+            daemon=True)
+    thread.start()
+
+
+def _on_job_finished() -> None:
+    """Called when a job finishes — remove from queue and start next."""
+    with _lock:
+        job_id = _job["id"] if _job else None
+        # Remove the finished item from queue
+        _queue[:] = [item for item in _queue if item.get("id") != job_id]
+    _save_queue()
+    _process_next_in_queue()
+
 
 STEP_NAMES = {
     1: "Downloading",
@@ -211,6 +316,39 @@ def _save_job_json() -> None:
     job_json.write_text(json.dumps(snapshot, default=str))
 
 
+def _check_pause() -> bool:
+    """Check if pause or cancel was requested. Returns True to stop the pipeline."""
+    if _cancel_requested:
+        _update_job(status="failed", error="Cancelled by user", finished_at=_now_iso())
+        _save_job_json()
+        # Remove from queue and clean up work dir
+        with _lock:
+            job_id = _job["id"] if _job else None
+            _queue[:] = [i for i in _queue if i.get("id") != job_id]
+        _save_queue()
+        if _job:
+            work_dir = Path(_job["output_dir"]) / "work"
+            _cleanup_work_dir(work_dir)
+            # Remove the entire job directory since it was cancelled
+            job_dir = Path(_job["output_dir"])
+            if job_dir.exists():
+                shutil.rmtree(job_dir, ignore_errors=True)
+        _process_next_in_queue()
+        return True
+    if _pause_requested:
+        _update_job(status="paused", finished_at=_now_iso())
+        _save_job_json()
+        with _lock:
+            job_id = _job["id"] if _job else None
+            for item in _queue:
+                if item.get("id") == job_id:
+                    item["status"] = "paused"
+                    break
+        _save_queue()
+        return True
+    return False
+
+
 def _cleanup_work_dir(work_dir: Path) -> None:
     """Remove the work directory to free disk space after a successful job."""
     if work_dir.exists():
@@ -291,6 +429,7 @@ def _run_pipeline(job_id: str, url: str, output_dir: Path,
         )
 
         # --- Step 2: Separate ---
+        if _check_pause(): return
         if resume_from <= 2:
             t0 = time.monotonic()
             _update_job(step=2, step_name=STEP_NAMES[2], step_progress=0.0,
@@ -321,6 +460,7 @@ def _run_pipeline(job_id: str, url: str, output_dir: Path,
                          artifacts=artifacts)
 
         # --- Step 3: Transcribe ---
+        if _check_pause(): return
         segments = None
         if resume_from <= 3:
             t0 = time.monotonic()
@@ -346,6 +486,7 @@ def _run_pipeline(job_id: str, url: str, output_dir: Path,
                          artifacts=artifacts)
 
         # --- Step 4: Subtitles ---
+        if _check_pause(): return
         if resume_from <= 4:
             t0 = time.monotonic()
             _update_job(step=4, step_name=STEP_NAMES[4], step_progress=0.0,
@@ -372,6 +513,7 @@ def _run_pipeline(job_id: str, url: str, output_dir: Path,
                          artifacts=artifacts)
 
         # --- Step 5: Compose ---
+        if _check_pause(): return
         if resume_from <= 5:
             t0 = time.monotonic()
             _update_job(step=5, step_name=STEP_NAMES[5], step_progress=0.0,
@@ -403,10 +545,12 @@ def _run_pipeline(job_id: str, url: str, output_dir: Path,
         _update_job(status="done", finished_at=_now_iso(),
                     step_durations=step_durations)
         _save_job_json()
+        _on_job_finished()
 
     except Exception as e:
         _update_job(status="failed", error=str(e), finished_at=_now_iso())
         _save_job_json()
+        _on_job_finished()
 
 
 def _run_subtitled_pipeline(job_id: str, url: str, output_dir: Path,
@@ -447,6 +591,7 @@ def _run_subtitled_pipeline(job_id: str, url: str, output_dir: Path,
         )
 
         # --- Step 2: Transcribe in source language (Whisper auto-detect) ---
+        if _check_pause(): return
         t0 = time.monotonic()
         _update_job(step=2, step_name=STEP_NAMES_SUBTITLED[2], step_progress=0.0,
                      step_started_at=_now_iso())
@@ -474,6 +619,7 @@ def _run_subtitled_pipeline(job_id: str, url: str, output_dir: Path,
         })
 
         # --- Step 3: Translate to all target languages via Claude API ---
+        if _check_pause(): return
         if languages:
             t0 = time.monotonic()
             source_srt_text = source_srt_path.read_text()
@@ -488,7 +634,11 @@ def _run_subtitled_pipeline(job_id: str, url: str, output_dir: Path,
                              step_started_at=_now_iso())
                 _save_job_json()
 
-                translated_srt = translate_srt(source_srt_text, target_name)
+                with _lock:
+                    job_title = _job.get("title") if _job else None
+                    job_channel = _job.get("channel") if _job else None
+                translated_srt = translate_srt(source_srt_text, target_name,
+                                               title=job_title, artist=job_channel)
                 srt_name = f"subtitles_{lang}.srt"
                 (output_dir / srt_name).write_text(translated_srt)
                 srt_artifacts.append({"name": srt_name, "path": srt_name})
@@ -508,10 +658,12 @@ def _run_subtitled_pipeline(job_id: str, url: str, output_dir: Path,
         _update_job(status="done", finished_at=_now_iso(),
                     step_durations=step_durations)
         _save_job_json()
+        _on_job_finished()
 
     except Exception as e:
         _update_job(status="failed", error=str(e), finished_at=_now_iso())
         _save_job_json()
+        _on_job_finished()
 
 
 # ---------------------------------------------------------------------------
@@ -520,8 +672,9 @@ def _run_subtitled_pipeline(job_id: str, url: str, output_dir: Path,
 @app.on_event("startup")
 def _recover_jobs() -> None:
     global _job
-    # Load historical timing data for better estimates
+    # Load historical timing data and queue
     _load_stats()
+    _load_queue()
     if not JOBS_DIR.exists():
         return
     # Find the most recent job directory
@@ -543,6 +696,15 @@ def _recover_jobs() -> None:
         _job = data
         break  # only restore the most recent
 
+    # Reset any "processing" queue items to "queued" (server restarted mid-job)
+    for item in _queue:
+        if item.get("status") == "processing":
+            item["status"] = "queued"
+    _save_queue()
+
+    # Auto-start queued items
+    _process_next_in_queue()
+
     # Clean up work directories for all completed jobs
     for d in JOBS_DIR.iterdir():
         if not d.is_dir():
@@ -561,7 +723,152 @@ def _recover_jobs() -> None:
 
 
 # ---------------------------------------------------------------------------
-# API
+# Auth API
+# ---------------------------------------------------------------------------
+
+class RegisterRequest(BaseModel):
+    email: str
+    name: str
+    password: str
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class SettingsRequest(BaseModel):
+    theme: str | None = None
+    dark_mode: str | None = None
+
+
+def _set_auth_cookie(response: Response, user: User) -> None:
+    token = create_token(str(user.id))
+    response.set_cookie(
+        key="access_token",
+        value=token,
+        httponly=True,
+        samesite="lax",
+        max_age=72 * 3600,
+        path="/",
+    )
+
+
+@app.post("/api/auth/register")
+def register(req: RegisterRequest, response: Response, db: Session = Depends(get_db)):
+    if db.query(User).filter(User.email == req.email.lower()).first():
+        raise HTTPException(400, "Email already registered")
+    user = create_user_with_permissions(db, email=req.email, name=req.name, password=req.password)
+    _set_auth_cookie(response, user)
+    return {"user": user.to_dict()}
+
+
+@app.post("/api/auth/login")
+def login(req: LoginRequest, response: Response, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == req.email.lower()).first()
+    if not user or not user.password_hash or not verify_password(req.password, user.password_hash):
+        raise HTTPException(401, "Invalid email or password")
+    from datetime import datetime, timezone as tz
+    user.last_login = datetime.now(tz.utc)
+    db.commit()
+    _set_auth_cookie(response, user)
+    return {"user": user.to_dict()}
+
+
+@app.get("/api/auth/google")
+def google_login():
+    """Redirect to Google OAuth. Requires GOOGLE_CLIENT_ID to be set."""
+    import os
+    client_id = os.getenv("GOOGLE_CLIENT_ID", "")
+    if not client_id:
+        raise HTTPException(501, "Google OAuth not configured")
+    redirect_uri = "/api/auth/google/callback"
+    scope = "openid email profile"
+    url = (
+        f"https://accounts.google.com/o/oauth2/v2/auth?"
+        f"client_id={client_id}&response_type=code&scope={scope}"
+        f"&redirect_uri={redirect_uri}&access_type=offline"
+    )
+    return RedirectResponse(url)
+
+
+@app.get("/api/auth/google/callback")
+def google_callback(code: str, response: Response, db: Session = Depends(get_db)):
+    """Handle Google OAuth callback."""
+    import os
+    import httpx
+    client_id = os.getenv("GOOGLE_CLIENT_ID", "")
+    client_secret = os.getenv("GOOGLE_CLIENT_SECRET", "")
+    if not client_id or not client_secret:
+        raise HTTPException(501, "Google OAuth not configured")
+
+    # Exchange code for tokens
+    token_resp = httpx.post("https://oauth2.googleapis.com/token", data={
+        "code": code,
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "redirect_uri": "/api/auth/google/callback",
+        "grant_type": "authorization_code",
+    })
+    if token_resp.status_code != 200:
+        raise HTTPException(400, "Failed to exchange OAuth code")
+    tokens = token_resp.json()
+
+    # Get user info
+    userinfo_resp = httpx.get("https://www.googleapis.com/oauth2/v2/userinfo",
+                               headers={"Authorization": f"Bearer {tokens['access_token']}"})
+    if userinfo_resp.status_code != 200:
+        raise HTTPException(400, "Failed to get user info")
+    info = userinfo_resp.json()
+
+    # Find or create user
+    user = db.query(User).filter(User.google_id == info["id"]).first()
+    if not user:
+        user = db.query(User).filter(User.email == info["email"].lower()).first()
+        if user:
+            user.google_id = info["id"]
+            user.picture_url = info.get("picture")
+        else:
+            user = create_user_with_permissions(
+                db, email=info["email"], name=info.get("name", ""),
+                google_id=info["id"], picture_url=info.get("picture"),
+            )
+    from datetime import datetime, timezone as tz
+    user.last_login = datetime.now(tz.utc)
+    db.commit()
+
+    resp = RedirectResponse("/")
+    _set_auth_cookie(resp, user)
+    return resp
+
+
+@app.post("/api/auth/logout")
+def logout(response: Response):
+    response.delete_cookie("access_token", path="/")
+    return {"logged_out": True}
+
+
+@app.get("/api/auth/me")
+def get_me(user: User = Depends(get_current_user)):
+    data = user.to_dict()
+    if user.permissions:
+        data["permissions"] = user.permissions.to_dict()
+    return {"user": data}
+
+
+@app.put("/api/auth/settings")
+def update_settings(req: SettingsRequest, user: User = Depends(get_current_user),
+                     db: Session = Depends(get_db)):
+    if req.theme and req.theme in ("retro", "spotify", "disco"):
+        user.theme = req.theme
+    if req.dark_mode and req.dark_mode in ("dark", "day", "night"):
+        user.dark_mode = req.dark_mode
+    db.commit()
+    return {"user": user.to_dict()}
+
+
+# ---------------------------------------------------------------------------
+# Production API
 # ---------------------------------------------------------------------------
 class JobRequest(BaseModel):
     url: str
@@ -657,6 +964,211 @@ def get_current_job():
         return {"job": dict(_job) if _job else None}
 
 
+# ---------------------------------------------------------------------------
+# Queue API
+# ---------------------------------------------------------------------------
+
+class QueueRequest(BaseModel):
+    url: str
+    mode: str = "karaoke"
+    languages: list[str] = []
+
+
+@app.post("/api/queue")
+def add_to_queue(req: QueueRequest, user: User | None = Depends(get_optional_user)):
+    """Add an item to the production queue."""
+    mode = req.mode if req.mode in ("karaoke", "subtitled") else "karaoke"
+    languages = req.languages[:3] if req.languages else []
+    if mode != "subtitled":
+        languages = []
+
+    # Fetch metadata
+    meta = {}
+    try:
+        meta = fetch_metadata(req.url)
+    except Exception:
+        pass
+    title = meta.get("title", "Unknown")
+
+    slug = _slugify(title)
+    item_id = f"{slug}-{secrets.token_hex(2)}"
+
+    item = {
+        "id": item_id,
+        "url": req.url,
+        "mode": mode,
+        "languages": languages,
+        "title": title,
+        "thumbnail": meta.get("thumbnail"),
+        "channel": meta.get("channel"),
+        "upload_date": meta.get("upload_date"),
+        "categories": meta.get("categories", []),
+        "tags": meta.get("tags", []),
+        "status": "queued",
+        "added_by": user.name.split()[0] if user and user.name else "Anonymous",
+    }
+
+    with _lock:
+        _queue.append(item)
+    _save_queue()
+
+    # Auto-start if nothing is running
+    _process_next_in_queue()
+
+    return {"item": item, "queue": _queue}
+
+
+@app.get("/api/queue")
+def get_queue():
+    """Return the current queue and active job status."""
+    with _lock:
+        queue_with_progress = []
+        for item in _queue:
+            entry = dict(item)
+            # If this item is currently processing, merge job progress
+            if _job and _job.get("id") == item.get("id") and _job.get("status") == "running":
+                entry["step"] = _job.get("step", 0)
+                entry["step_name"] = _job.get("step_name", "")
+                entry["step_progress"] = _job.get("step_progress", 0)
+                entry["status"] = "processing"
+            queue_with_progress.append(entry)
+        return {"queue": queue_with_progress, "job": dict(_job) if _job else None}
+
+
+@app.delete("/api/queue/{item_id}")
+def remove_from_queue(item_id: str):
+    """Remove an item from the queue. If processing, request cancellation."""
+    global _cancel_requested
+    with _lock:
+        item = next((i for i in _queue if i["id"] == item_id), None)
+        if not item:
+            raise HTTPException(404, "Item not found in queue")
+
+        is_processing = (_job and _job.get("id") == item_id and _job.get("status") == "running")
+
+    if is_processing:
+        # Signal the pipeline thread to cancel between steps
+        _cancel_requested = True
+        # Don't remove from queue here — _check_pause will handle cleanup
+        return {"deleted": True, "cancelling": True, "queue": _queue}
+
+    # Not processing — just remove immediately
+    with _lock:
+        _queue[:] = [i for i in _queue if i["id"] != item_id]
+    _save_queue()
+    return {"deleted": True, "queue": _queue}
+
+
+class ReorderRequest(BaseModel):
+    order: list[str]
+
+
+@app.post("/api/queue/reorder")
+def reorder_queue(req: ReorderRequest):
+    """Reorder the queue based on the provided ID order."""
+    with _lock:
+        id_map = {item["id"]: item for item in _queue}
+        new_queue = []
+        for item_id in req.order:
+            if item_id in id_map:
+                new_queue.append(id_map.pop(item_id))
+        # Append any items not in the order list (shouldn't happen but be safe)
+        for item in id_map.values():
+            new_queue.append(item)
+        _queue[:] = new_queue
+    _save_queue()
+    return {"queue": _queue}
+
+
+@app.post("/api/queue/start")
+def start_queue():
+    """Manually trigger processing of the next queued item."""
+    _process_next_in_queue()
+    return {"started": True, "queue": _queue}
+
+
+@app.post("/api/queue/{item_id}/pause")
+def pause_queue_item(item_id: str):
+    """Request pause of the currently processing item."""
+    global _pause_requested
+    with _lock:
+        if not _job or _job.get("id") != item_id or _job.get("status") != "running":
+            raise HTTPException(400, "Item is not currently processing")
+    _pause_requested = True
+    return {"paused": True}
+
+
+@app.post("/api/queue/{item_id}/resume")
+def resume_queue_item(item_id: str):
+    """Resume a paused queue item."""
+    global _pause_requested
+    with _lock:
+        item = next((i for i in _queue if i["id"] == item_id), None)
+        if not item:
+            raise HTTPException(404, "Item not found")
+    _pause_requested = False
+
+    # Find the job data and resume it
+    output_dir = JOBS_DIR / item_id
+    job_json = output_dir / "job.json"
+    if not job_json.exists():
+        # Never started — just re-queue and process
+        with _lock:
+            item["status"] = "queued"
+        _save_queue()
+        _process_next_in_queue()
+        return {"resumed": True}
+
+    data = json.loads(job_json.read_text())
+    resume_step = _detect_resume_step(output_dir)
+    mode = data.get("mode", "karaoke")
+    languages = data.get("languages", [])
+
+    with _lock:
+        item["status"] = "processing"
+    _save_queue()
+
+    global _job
+    _job = {
+        "id": item_id,
+        "url": data.get("url", ""),
+        "mode": mode,
+        "languages": languages,
+        "title": data.get("title", "Unknown"),
+        "thumbnail": data.get("thumbnail"),
+        "channel": data.get("channel"),
+        "status": "running",
+        "step": 0,
+        "step_name": f"Resuming from step {resume_step}",
+        "step_progress": 0.0,
+        "started_at": _now_iso(),
+        "step_started_at": _now_iso(),
+        "finished_at": None,
+        "audio_duration": data.get("audio_duration"),
+        "estimated_total": None,
+        "step_estimates": None,
+        "error": None,
+        "artifacts": data.get("artifacts", {}),
+        "output_dir": str(output_dir),
+    }
+    _save_job_json()
+
+    if mode == "subtitled":
+        thread = threading.Thread(
+            target=_run_subtitled_pipeline,
+            args=(item_id, data.get("url", ""), output_dir, languages),
+            daemon=True)
+    else:
+        thread = threading.Thread(
+            target=_run_pipeline,
+            args=(item_id, data.get("url", ""), output_dir),
+            kwargs={"resume_from": resume_step},
+            daemon=True)
+    thread.start()
+
+    return {"resumed": True}
+
+
 @app.post("/api/jobs/{job_id}/resume")
 def resume_job(job_id: str):
     global _job
@@ -715,11 +1227,34 @@ def resume_job(job_id: str):
 
 
 @app.get("/api/library")
-def get_library():
-    """Return all completed jobs as a list, sorted newest first."""
+def get_library(user: User | None = Depends(get_optional_user),
+                db: Session = Depends(get_db)):
+    """Return all completed jobs as a list, sorted newest first, with vote data."""
+    from sqlalchemy import func
+
     items = []
     if not JOBS_DIR.exists():
         return {"items": items}
+
+    # Preload all vote counts in one query
+    vote_rows = db.query(
+        Vote.job_id, Vote.value, func.count()
+    ).group_by(Vote.job_id, Vote.value).all()
+    vote_map: dict[str, dict] = {}
+    for job_id, value, count in vote_rows:
+        if job_id not in vote_map:
+            vote_map[job_id] = {"upvotes": 0, "downvotes": 0}
+        if value == 1:
+            vote_map[job_id]["upvotes"] = count
+        elif value == -1:
+            vote_map[job_id]["downvotes"] = count
+
+    # Preload current user's votes
+    user_votes = {}
+    if user:
+        for v in db.query(Vote).filter(Vote.user_id == user.id).all():
+            user_votes[v.job_id] = v.value
+
     for d in JOBS_DIR.iterdir():
         if not d.is_dir():
             continue
@@ -732,8 +1267,10 @@ def get_library():
             continue
         if data.get("status") != "done":
             continue
+        job_id = data.get("id", d.name)
+        votes = vote_map.get(job_id, {"upvotes": 0, "downvotes": 0})
         items.append({
-            "id": data.get("id", d.name),
+            "id": job_id,
             "title": data.get("title", "Unknown"),
             "url": data.get("url"),
             "mode": data.get("mode", "karaoke"),
@@ -745,6 +1282,9 @@ def get_library():
             "tags": data.get("tags", []),
             "finished_at": data.get("finished_at"),
             "audio_duration": data.get("audio_duration"),
+            "upvotes": votes["upvotes"],
+            "downvotes": votes["downvotes"],
+            "user_vote": user_votes.get(job_id, 0),
         })
     items.sort(key=lambda x: x.get("finished_at") or "", reverse=True)
     return {"items": items}
@@ -927,11 +1467,203 @@ def download_artifact(job_id: str, filepath: str):
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Feedback API
+# ---------------------------------------------------------------------------
+
+from fastapi import File, Form, UploadFile
+
+@app.post("/api/feedback")
+async def submit_feedback(
+    subject: str = Form(...),
+    description: str = Form(...),
+    screenshot: UploadFile | None = File(None),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    screenshot_path = None
+    if screenshot and screenshot.filename:
+        feedback_dir = Path("output/feedback")
+        feedback_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"{secrets.token_hex(8)}_{screenshot.filename}"
+        filepath = feedback_dir / filename
+        content = await screenshot.read()
+        if len(content) > 5 * 1024 * 1024:
+            raise HTTPException(400, "Screenshot must be under 5MB")
+        filepath.write_bytes(content)
+        screenshot_path = str(filepath)
+
+    fb = Feedback(
+        user_id=user.id,
+        subject=subject,
+        description=description,
+        screenshot_path=screenshot_path,
+    )
+    db.add(fb)
+    db.commit()
+    return {"submitted": True}
+
+
+# ---------------------------------------------------------------------------
+# Admin API
+# ---------------------------------------------------------------------------
+
+@app.get("/api/admin/users")
+def admin_list_users(admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    users = db.query(User).order_by(User.created_at.desc()).all()
+    result = []
+    for u in users:
+        data = u.to_dict()
+        data["permissions"] = u.permissions.to_dict() if u.permissions else {}
+        result.append(data)
+    return {"users": result}
+
+
+class UpdatePermissionsRequest(BaseModel):
+    max_karaoke_per_day: int | None = None
+    max_subtitled_per_day: int | None = None
+    max_queue_length: int | None = None
+    can_download_karaoke: bool | None = None
+    can_download_instrumental: bool | None = None
+    can_download_vocals: bool | None = None
+    can_delete_library: bool | None = None
+    can_share_library: bool | None = None
+
+
+@app.put("/api/admin/users/{user_id}/permissions")
+def admin_update_permissions(user_id: str, req: UpdatePermissionsRequest,
+                              admin: User = Depends(require_admin),
+                              db: Session = Depends(get_db)):
+    perms = db.query(UserPermissions).filter(UserPermissions.user_id == user_id).first()
+    if not perms:
+        raise HTTPException(404, "User not found")
+    for field, value in req.model_dump(exclude_none=True).items():
+        setattr(perms, field, value)
+    db.commit()
+    return {"permissions": perms.to_dict()}
+
+
+@app.put("/api/admin/users/{user_id}/role")
+def admin_update_role(user_id: str, role: str,
+                       admin: User = Depends(require_admin),
+                       db: Session = Depends(get_db)):
+    if role not in ("user", "admin"):
+        raise HTTPException(400, "Invalid role")
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(404, "User not found")
+    target.role = role
+    db.commit()
+    return {"user": target.to_dict()}
+
+
+@app.get("/api/admin/feedback")
+def admin_list_feedback(admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    items = db.query(Feedback).order_by(Feedback.created_at.desc()).all()
+    return {"feedback": [fb.to_dict() for fb in items]}
+
+
+@app.put("/api/admin/feedback/{feedback_id}")
+def admin_update_feedback(feedback_id: str, status: str,
+                           admin: User = Depends(require_admin),
+                           db: Session = Depends(get_db)):
+    if status not in ("new", "reviewed", "resolved"):
+        raise HTTPException(400, "Invalid status")
+    fb = db.query(Feedback).filter(Feedback.id == feedback_id).first()
+    if not fb:
+        raise HTTPException(404, "Feedback not found")
+    fb.status = status
+    db.commit()
+    return {"feedback": fb.to_dict()}
+
+
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Votes API
+# ---------------------------------------------------------------------------
+
+class VoteRequest(BaseModel):
+    value: int  # +1 or -1
+
+
+@app.post("/api/jobs/{job_id}/vote")
+def vote_on_job(job_id: str, req: VoteRequest, user: User = Depends(get_current_user),
+                db: Session = Depends(get_db)):
+    """Cast or update a vote on a library item."""
+    if req.value not in (1, -1):
+        raise HTTPException(400, "Vote value must be 1 or -1")
+
+    existing = db.query(Vote).filter(Vote.user_id == user.id, Vote.job_id == job_id).first()
+    if existing:
+        if existing.value == req.value:
+            # Same vote again — remove it (toggle off)
+            db.delete(existing)
+            db.commit()
+            return _get_vote_summary(job_id, user.id, db)
+        else:
+            # Switch vote
+            existing.value = req.value
+            db.commit()
+            return _get_vote_summary(job_id, user.id, db)
+    else:
+        vote = Vote(user_id=user.id, job_id=job_id, value=req.value)
+        db.add(vote)
+        db.commit()
+        return _get_vote_summary(job_id, user.id, db)
+
+
+@app.get("/api/jobs/{job_id}/votes")
+def get_job_votes(job_id: str, user: User | None = Depends(get_optional_user),
+                  db: Session = Depends(get_db)):
+    """Get vote counts for a job."""
+    user_id = user.id if user else None
+    return _get_vote_summary(job_id, user_id, db)
+
+
+@app.get("/api/votes/batch")
+def get_batch_votes(job_ids: str, user: User | None = Depends(get_optional_user),
+                    db: Session = Depends(get_db)):
+    """Get vote counts for multiple jobs. job_ids is comma-separated."""
+    ids = [jid.strip() for jid in job_ids.split(",") if jid.strip()]
+    user_id = user.id if user else None
+    result = {}
+    for jid in ids:
+        result[jid] = _get_vote_summary(jid, user_id, db)
+    return {"votes": result}
+
+
+def _get_vote_summary(job_id: str, user_id, db: Session) -> dict:
+    """Get upvotes, downvotes, and current user's vote for a job."""
+    from sqlalchemy import func
+    rows = db.query(Vote.value, func.count()).filter(Vote.job_id == job_id).group_by(Vote.value).all()
+    upvotes = 0
+    downvotes = 0
+    for value, count in rows:
+        if value == 1:
+            upvotes = count
+        elif value == -1:
+            downvotes = count
+    user_vote = 0
+    if user_id:
+        existing = db.query(Vote).filter(Vote.user_id == user_id, Vote.job_id == job_id).first()
+        if existing:
+            user_vote = existing.value
+    return {"job_id": job_id, "upvotes": upvotes, "downvotes": downvotes, "user_vote": user_vote}
+
+
+# ---------------------------------------------------------------------------
 # Static files & index
 # ---------------------------------------------------------------------------
 @app.get("/")
-def index():
+def index(user: User | None = Depends(get_optional_user)):
+    # Always serve the app — the frontend handles auth checks
+    # This allows shared watch links (/#/watch/id) to work without login
     return FileResponse("static/index.html")
+
+
+@app.get("/login")
+def login_page():
+    return FileResponse("static/login.html")
 
 
 @app.get("/favicon.ico")

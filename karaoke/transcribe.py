@@ -65,19 +65,11 @@ def _is_hallucination(text: str) -> bool:
 def _filter_hallucinations(segments: list[Segment]) -> list[Segment]:
     """Remove segments that contain known Whisper hallucinations."""
     filtered = []
-    seen_texts: dict[str, int] = {}
-
     for seg in segments:
         text = " ".join(w.text for w in seg.words).strip()
 
         # Skip known hallucination phrases
         if _is_hallucination(text):
-            continue
-
-        # Skip segments with identical text appearing more than 3 times
-        normalized = text.lower().strip()
-        seen_texts[normalized] = seen_texts.get(normalized, 0) + 1
-        if seen_texts[normalized] > 3:
             continue
 
         filtered.append(seg)
@@ -104,7 +96,7 @@ def transcribe(audio_path: Path, device: str = "cpu",
         condition_on_previous_text=False,
         language=language if not translate else None,
         task="translate" if translate else "transcribe",
-        hallucination_silence_threshold=2.0,
+        hallucination_silence_threshold=3.0,
     )
 
     segments: list[Segment] = []
