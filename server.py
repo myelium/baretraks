@@ -29,7 +29,7 @@ from auth import (
     get_optional_user, hash_password, is_admin, require_admin, verify_password,
 )
 from database import SessionLocal, get_db
-from models import Comment, Feedback, Invitation, JobMetadata, Playlist, PlaylistItem, User, UserPermissions, Vote, WishlistItem, WishlistVote
+from models import ActivityLog, Comment, Feedback, Invitation, JobMetadata, Playlist, PlaylistItem, User, UserPermissions, Vote, WishlistItem, WishlistVote
 
 import logging
 import os
@@ -45,6 +45,21 @@ from karaoke.translate import translate_srt
 FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 JOBS_DIR = Path("output/jobs")
 STATS_PATH = JOBS_DIR / "stats.json"
+
+
+def _log_activity(db, user, event_type: str, detail: dict | None = None) -> None:
+    """Append an entry to the activity log. Non-blocking — won't raise on failure."""
+    try:
+        db.add(ActivityLog(
+            user_id=user.id if user else None,
+            user_name=user.name if user else "Anonymous",
+            event_type=event_type,
+            detail=json.dumps(detail) if detail else None,
+        ))
+        db.commit()
+    except Exception:
+        pass
+
 
 # --- Compute device (cpu/cuda) ---
 def _detect_device() -> str:
@@ -662,7 +677,7 @@ def _run_pipeline(job_id: str, url: str, output_dir: Path,
             _convert_to_mp3(vocals_wav, vocals_mp3)
             instrumental_wav.unlink(missing_ok=True)
             vocals_wav.unlink(missing_ok=True)
-            audio_path.unlink(missing_ok=True)
+            # Keep audio_path — needed for transcription (better quality than separated vocals)
             step_durations["2"] = time.monotonic() - t0
             with _lock:
                 artifacts = dict(_job.get("artifacts", {}))
@@ -689,7 +704,13 @@ def _run_pipeline(job_id: str, url: str, output_dir: Path,
             _update_job(step=3, step_name=STEP_NAMES[3], step_progress=0.0,
                          step_started_at=_now_iso())
             _save_job_json()
-            segments, detected_lang = transcribe(vocals_mp3, device=device)
+            # Transcribe from original audio (full mix) — much more accurate than
+            # separated vocals which can have artifacts that confuse Whisper
+            transcribe_path = audio_path if audio_path.exists() else vocals_mp3
+            segments, detected_lang = transcribe(transcribe_path, device=device)
+            # Clean up original audio now that transcription is done
+            if audio_path.exists() and audio_path != vocals_mp3:
+                audio_path.unlink(missing_ok=True)
             _update_job(language_detected=detected_lang)
             _save_job_json()
             words_list = []
@@ -987,7 +1008,7 @@ def _run_combined_pipeline(job_id: str, url: str, output_dir: Path,
         _convert_to_mp3(vocals_wav, vocals_mp3)
         instrumental_wav.unlink(missing_ok=True)
         vocals_wav.unlink(missing_ok=True)
-        audio_path.unlink(missing_ok=True)
+        # Keep audio_path — needed for transcription
         step_durations["2"] = time.monotonic() - t0
         with _lock:
             artifacts = dict(_job.get("artifacts", {}))
@@ -1003,7 +1024,10 @@ def _run_combined_pipeline(job_id: str, url: str, output_dir: Path,
         _update_job(step=3, step_name=STEP_NAMES_BOTH[3], step_progress=0.0,
                      step_started_at=_now_iso())
         _save_job_json()
-        segments, detected_lang = transcribe(vocals_mp3, device=device)
+        transcribe_path = audio_path if audio_path.exists() else vocals_mp3
+        segments, detected_lang = transcribe(transcribe_path, device=device)
+        if audio_path.exists() and audio_path != vocals_mp3:
+            audio_path.unlink(missing_ok=True)
         _update_job(language_detected=detected_lang)
         _save_job_json()
         words_list = []
@@ -1240,6 +1264,22 @@ def _run_migrations() -> None:
             """))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_wishlist_votes_item ON wishlist_votes (wishlist_item_id)"))
 
+    # --- Activity log table ---
+    if "activity_log" not in tables:
+        with engine.begin() as conn:
+            conn.execute(text("""
+                CREATE TABLE activity_log (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                    user_name VARCHAR(255) NOT NULL DEFAULT 'Anonymous',
+                    event_type VARCHAR(30) NOT NULL,
+                    detail TEXT,
+                    created_at TIMESTAMPTZ DEFAULT now()
+                )
+            """))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_activity_log_event ON activity_log (event_type)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_activity_log_created ON activity_log (created_at DESC)"))
+
 
 @app.on_event("startup")
 def _recover_jobs() -> None:
@@ -1273,6 +1313,10 @@ def _recover_jobs() -> None:
             data["error"] = "Server restarted during processing"
             data["finished_at"] = _now_iso()
             job_json.write_text(json.dumps(data, default=str))
+
+        # Skip jobs that were explicitly removed by user
+        if data.get("status") == "removed":
+            continue
 
         # Add any failed job to the queue so it retries automatically
         if data.get("status") == "failed" and job_id not in queue_ids:
@@ -1404,6 +1448,7 @@ def login(req: LoginRequest, response: Response, db: Session = Depends(get_db)):
     from datetime import datetime, timezone as tz
     user.last_login = datetime.now(tz.utc)
     db.commit()
+    _log_activity(db, user, "login", {"method": "password"})
     _set_auth_cookie(response, user)
     return {"user": user.to_dict()}
 
@@ -1487,6 +1532,7 @@ def google_callback(code: str, state: str = "", db: Session = Depends(get_db)):
     from datetime import datetime, timezone as tz
     user.last_login = datetime.now(tz.utc)
     db.commit()
+    _log_activity(db, user, "login", {"method": "google"})
 
     resp = RedirectResponse("/")
     _set_auth_cookie(resp, user)
@@ -1758,6 +1804,7 @@ def add_to_queue(req: QueueRequest, user: User | None = Depends(get_optional_use
     with _lock:
         _queue.append(item)
     _save_queue()
+    _log_activity(db, user, "queue", {"title": title, "url": req.url, "mode": mode})
 
     # Auto-start if nothing is running
     _process_next_in_queue()
@@ -1822,12 +1869,68 @@ def remove_from_queue(item_id: str):
             # Only clean up if not a completed job (those live in the library)
             if data.get("status") != "done":
                 shutil.rmtree(job_dir, ignore_errors=True)
+                # If directory couldn't be deleted, mark as removed so recovery skips it
+                if job_dir.exists() and job_json.exists():
+                    data["status"] = "removed"
+                    job_json.write_text(json.dumps(data, default=str))
                 # Clear current job reference if it was the deleted one
                 with _lock:
                     if _job is not None and _job.get("id") == item_id:
                         _job = None
 
+    # Clean up any DB metadata
+    try:
+        _db = SessionLocal()
+        _db.query(JobMetadata).filter(JobMetadata.job_id == item_id).delete()
+        _db.commit()
+        _db.close()
+    except Exception:
+        pass
+
     return {"deleted": True, "queue": _queue}
+
+
+@app.post("/api/queue/{item_id}/request")
+def convert_queue_to_wishlist(item_id: str, user: User = Depends(get_current_user),
+                              db: Session = Depends(get_db)):
+    """Move a queue item to the wishlist (song request). Only the user who added it can do this."""
+    with _lock:
+        item = next((i for i in _queue if i["id"] == item_id), None)
+        if not item:
+            raise HTTPException(404, "Item not found in queue")
+        # Only the user who queued it (or admin) can convert it
+        if item.get("added_by_id") != str(user.id) and not is_admin(user):
+            raise HTTPException(403, "You can only move your own queue items to requests")
+        # Don't allow converting a processing item
+        if _job and _job.get("id") == item_id and _job.get("status") == "running":
+            raise HTTPException(409, "Cannot move a processing item")
+        _queue[:] = [i for i in _queue if i["id"] != item_id]
+    _save_queue()
+
+    # Create wishlist item from queue data
+    wish = WishlistItem(
+        user_id=user.id,
+        url=item.get("url"),
+        title=item.get("title", "Unknown"),
+        artist=item.get("channel"),
+        thumbnail=item.get("thumbnail"),
+    )
+    db.add(wish)
+    db.commit()
+
+    # Clean up job directory if it exists
+    job_dir = JOBS_DIR / item_id
+    if job_dir.exists():
+        job_json = job_dir / "job.json"
+        if job_json.exists():
+            try:
+                data = json.loads(job_json.read_text())
+                if data.get("status") != "done":
+                    shutil.rmtree(job_dir, ignore_errors=True)
+            except (json.JSONDecodeError, OSError):
+                pass
+
+    return {"moved": True, "queue": _queue}
 
 
 class ReorderRequest(BaseModel):
@@ -2157,7 +2260,8 @@ def stream_vocals(job_id: str):
 
 
 @app.post("/api/jobs/{job_id}/view")
-def record_view(job_id: str, db: Session = Depends(get_db)):
+def record_view(job_id: str, user: User | None = Depends(get_optional_user),
+                db: Session = Depends(get_db)):
     """Increment the view count for a job."""
     meta = db.query(JobMetadata).filter(JobMetadata.job_id == job_id).first()
     if not meta:
@@ -2166,6 +2270,7 @@ def record_view(job_id: str, db: Session = Depends(get_db)):
     else:
         meta.view_count = (meta.view_count or 0) + 1
     db.commit()
+    _log_activity(db, user, "view", {"job_id": job_id})
     return {"view_count": meta.view_count}
 
 
@@ -2465,6 +2570,17 @@ def delete_job(job_id: str, user: User = Depends(get_current_user)):
         if _job is not None and _job.get("id") == job_id:
             _job = None
 
+    # Clean up DB metadata (votes, comments, job metadata)
+    try:
+        _db = SessionLocal()
+        _db.query(JobMetadata).filter(JobMetadata.job_id == job_id).delete()
+        _db.query(Vote).filter(Vote.job_id == job_id).delete()
+        _db.query(Comment).filter(Comment.job_id == job_id).delete()
+        _db.commit()
+        _db.close()
+    except Exception:
+        pass
+
     return {"deleted": True}
 
 
@@ -2699,6 +2815,33 @@ def admin_delete_user(user_id: str, admin: User = Depends(require_admin),
     return {"deleted": True}
 
 
+@app.get("/api/admin/activity")
+def admin_activity(admin: User = Depends(require_admin),
+                   db: Session = Depends(get_db),
+                   event_type: str | None = None,
+                   limit: int = 100,
+                   offset: int = 0):
+    """Return recent activity log entries with optional filtering."""
+    q = db.query(ActivityLog).order_by(ActivityLog.created_at.desc())
+    if event_type:
+        q = q.filter(ActivityLog.event_type == event_type)
+    total = q.count()
+    entries = q.offset(offset).limit(min(limit, 500)).all()
+    return {
+        "total": total,
+        "entries": [
+            {
+                "id": str(e.id),
+                "user_name": e.user_name,
+                "event_type": e.event_type,
+                "detail": json.loads(e.detail) if e.detail else None,
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+            }
+            for e in entries
+        ],
+    }
+
+
 @app.get("/api/admin/stats")
 def admin_stats(admin: User = Depends(require_admin), db: Session = Depends(get_db)):
     from sqlalchemy import func
@@ -2787,20 +2930,16 @@ def vote_on_job(job_id: str, req: VoteRequest, user: User = Depends(get_current_
     existing = db.query(Vote).filter(Vote.user_id == user.id, Vote.job_id == job_id).first()
     if existing:
         if existing.value == req.value:
-            # Same vote again — remove it (toggle off)
             db.delete(existing)
             db.commit()
-            return _get_vote_summary(job_id, user.id, db)
         else:
-            # Switch vote
             existing.value = req.value
             db.commit()
-            return _get_vote_summary(job_id, user.id, db)
     else:
-        vote = Vote(user_id=user.id, job_id=job_id, value=req.value)
-        db.add(vote)
+        db.add(Vote(user_id=user.id, job_id=job_id, value=req.value))
         db.commit()
-        return _get_vote_summary(job_id, user.id, db)
+    _log_activity(db, user, "vote", {"job_id": job_id, "value": req.value})
+    return _get_vote_summary(job_id, user.id, db)
 
 
 @app.get("/api/jobs/{job_id}/votes")
@@ -2940,6 +3079,7 @@ def toggle_wishlist_vote(item_id: str, user: User = Depends(get_current_user),
     from sqlalchemy import func
     count = db.query(func.count(WishlistVote.id)).filter(
         WishlistVote.wishlist_item_id == item.id).scalar() or 0
+    _log_activity(db, user, "vote", {"wishlist_item_id": str(item.id), "title": item.title, "voted": voted})
     return {"item_id": str(item.id), "vote_count": count, "user_voted": voted}
 
 
@@ -3148,6 +3288,7 @@ def post_comment(job_id: str, req: CommentRequest, user: User = Depends(get_curr
     db.add(comment)
     db.commit()
     db.refresh(comment)
+    _log_activity(db, user, "comment", {"job_id": job_id, "text": text[:100]})
     return {"comment": comment.to_dict()}
 
 
@@ -3209,6 +3350,8 @@ def send_invitations(req: InviteRequest, user: User = Depends(get_current_user),
         emailed = send_invite_email(email, user.name or "A friend", inv.token)
         sent.append({"email": email, "token": inv.token, "link": f"/login?invite={inv.token}", "emailed": emailed})
     db.commit()
+    for s in sent:
+        _log_activity(db, user, "invite", {"email": s["email"]})
     total_used = db.query(Invitation).filter(Invitation.inviter_id == user.id).count()
     return {
         "sent": sent,

@@ -2453,6 +2453,7 @@
     <!-- Tabs -->
     <div style="display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:0;">
       <button class="admin-tab active" data-tab="users" onclick="switchAdminTab('users')">Users</button>
+      <button class="admin-tab" data-tab="activity" onclick="switchAdminTab('activity')">Activity</button>
       <button class="admin-tab" data-tab="feedback" onclick="switchAdminTab('feedback')">Feedback</button>
       <button class="admin-tab" data-tab="comments" onclick="switchAdminTab('comments')">Comments</button>
       <button class="admin-tab" data-tab="invitations" onclick="switchAdminTab('invitations')">Invitations</button>
@@ -2463,6 +2464,7 @@
 
     <!-- Tab Content -->
     <div id="admin-tab-users" class="admin-tab-content"></div>
+    <div id="admin-tab-activity" class="admin-tab-content" style="display:none;"></div>
     <div id="admin-tab-feedback" class="admin-tab-content" style="display:none;"></div>
     <div id="admin-tab-comments" class="admin-tab-content" style="display:none;"></div>
     <div id="admin-tab-invitations" class="admin-tab-content" style="display:none;"></div>
@@ -2779,6 +2781,8 @@ function stopQueuePolling() {
 }
 
 async function pollQueue() {
+  // Skip if a reorder is in progress (prevent reverting the UI)
+  if (_suppressPollUntil && Date.now() < _suppressPollUntil) return;
   try {
     const resp = await fetch('/api/queue');
     const data = await resp.json();
@@ -2926,6 +2930,17 @@ async function pauseQueueItem(itemId) {
   } catch (e) {}
 }
 
+async function moveToWishlist(itemId) {
+  if (!await showConfirm('Move this item from the queue to Requests?')) return;
+  try {
+    const resp = await fetch(`/api/queue/${itemId}/request`, { method: 'POST' });
+    if (!resp.ok) { const d = await resp.json().catch(() => ({})); showAlert(d.detail || 'Failed to move'); return; }
+    const data = await resp.json();
+    productionQueue = data.queue || [];
+    renderQueue();
+  } catch (e) { showAlert('Error: ' + e.message); }
+}
+
 async function resumeQueueItem(itemId) {
   try {
     await fetch(`/api/queue/${itemId}/resume`, { method: 'POST' });
@@ -2952,7 +2967,7 @@ function renderQueue() {
 
   // If only the processing item changed, update it in-place to preserve animations
   const processingItem = productionQueue.find(q => q.status === 'processing');
-  if (processingItem) {
+  if (processingItem && !_forceFullRender) {
     const existingEl = list.querySelector(`.queue-item[data-id="${processingItem.id}"]`);
     const wasPauseRequested = existingEl?.querySelector('[title="Cancel pause"]') !== null;
     const isPauseNow = processingItem.pause_requested || false;
@@ -3049,7 +3064,7 @@ function renderQueue() {
         <div class="queue-item-icon">${icon}</div>
         <div class="queue-item-info">
           <div class="queue-item-title">${escapeHtml(item.title || 'Loading...')}</div>
-          <div class="queue-item-meta">${statusLine}${item.added_by ? ' &middot; ' + escapeHtml(item.added_by) : ''}</div>
+          <div class="queue-item-meta">${statusLine}${item.added_by ? ' &middot; ' + escapeHtml(item.added_by) : ''}${!isProcessing && currentUser && item.added_by_id === String(currentUser.id) && appSettings.feature_wishlist ? ` &middot; <a style="color:var(--accent);cursor:pointer;font-size:0.7rem;" onclick="event.stopPropagation(); moveToWishlist('${item.id}')">Request it</a>` : ''}</div>
           ${progressBar}
         </div>
         <div class="queue-item-actions">${actions}</div>
@@ -3059,6 +3074,7 @@ function renderQueue() {
 
   // Prepend quota warning if needed
   if (_diskQuotaExceeded) list.innerHTML = quotaWarning + list.innerHTML;
+  _forceFullRender = false;
 }
 
 // ---- Queue Drag and Drop ----
@@ -3095,6 +3111,9 @@ function onQueueDragEnd(e) {
   _draggedIndex = null;
 }
 
+let _suppressPollUntil = 0;
+let _forceFullRender = false;
+
 async function onQueueDrop(e) {
   e.preventDefault();
   const targetIndex = parseInt(e.currentTarget.dataset.index);
@@ -3106,17 +3125,27 @@ async function onQueueDrop(e) {
   // Reorder locally for instant feedback
   const [moved] = productionQueue.splice(_draggedIndex, 1);
   productionQueue.splice(targetIndex, 0, moved);
+  _forceFullRender = true;
   renderQueue();
+
+  // Suppress polling while we sync with server (prevent revert)
+  _suppressPollUntil = Date.now() + 5000;
 
   // Sync with server
   const order = productionQueue.map(item => item.id);
   try {
-    await fetch('/api/queue/reorder', {
+    const resp = await fetch('/api/queue/reorder', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ order }),
     });
+    if (resp.ok) {
+      const data = await resp.json();
+      productionQueue = data.queue || [];
+      renderQueue();
+    }
   } catch (e) {}
+  _suppressPollUntil = 0;
   _draggedIndex = null;
 }
 
@@ -5044,6 +5073,7 @@ function switchAdminTab(tab) {
   document.querySelectorAll('.admin-tab-content').forEach(c => c.style.display = 'none');
   document.getElementById(`admin-tab-${tab}`).style.display = '';
   if (tab === 'users') loadAdminUsers();
+  else if (tab === 'activity') loadAdminActivity();
   else if (tab === 'feedback') loadAdminFeedback();
   else if (tab === 'comments') loadAdminComments();
   else if (tab === 'invitations') loadAdminInvitations();
@@ -5254,6 +5284,81 @@ async function adminCreateUser() {
   } else {
     const err = await resp.json().catch(() => ({}));
     showAlert(err.detail || 'Failed to create user');
+  }
+}
+
+let _activityFilter = '';
+let _activityOffset = 0;
+const _ACTIVITY_LIMIT = 50;
+const _EVENT_COLORS = {
+  login: '#6b8', queue: 'var(--accent)', view: '#7eb8da',
+  invite: '#c89dda', comment: '#d4a84b', vote: '#e07050',
+};
+
+async function loadAdminActivity(append) {
+  const container = document.getElementById('admin-tab-activity');
+  if (!append) {
+    _activityOffset = 0;
+    container.innerHTML = '<p style="color:var(--text-dim);padding:12px;">Loading...</p>';
+  }
+  try {
+    const params = new URLSearchParams({ limit: _ACTIVITY_LIMIT, offset: _activityOffset });
+    if (_activityFilter) params.set('event_type', _activityFilter);
+    const resp = await fetch('/api/admin/activity?' + params);
+    if (!resp.ok) throw new Error();
+    const data = await resp.json();
+    const entries = data.entries || [];
+    const total = data.total || 0;
+
+    const types = ['', 'login', 'queue', 'view', 'invite', 'comment', 'vote'];
+    const filterBar = `
+      <div style="display:flex;gap:6px;padding:8px 12px;flex-wrap:wrap;align-items:center;">
+        ${types.map(t => `<button class="admin-filter-btn${_activityFilter === t ? ' active' : ''}" onclick="_activityFilter='${t}'; loadAdminActivity()">${t || 'All'}</button>`).join('')}
+        <span style="margin-left:auto;font-size:0.7rem;color:var(--text-dim);">${total} total</span>
+      </div>`;
+
+    const rows = entries.map(e => {
+      const d = e.detail || {};
+      const color = _EVENT_COLORS[e.event_type] || 'var(--text-dim)';
+      const ts = e.created_at ? new Date(e.created_at).toLocaleString() : '';
+      let summary = '';
+      if (e.event_type === 'login') summary = d.method || '';
+      else if (e.event_type === 'queue') summary = d.title ? `${d.title}` : d.url || '';
+      else if (e.event_type === 'view') summary = d.job_id || '';
+      else if (e.event_type === 'invite') summary = d.email || '';
+      else if (e.event_type === 'comment') summary = d.text || '';
+      else if (e.event_type === 'vote') summary = d.title || d.job_id || d.wishlist_item_id || '';
+      if (summary.length > 60) summary = summary.substring(0, 60) + '...';
+      return `
+        <div style="display:flex;align-items:center;gap:10px;padding:6px 12px;border-bottom:1px solid var(--border-light);font-size:0.78rem;">
+          <span style="width:130px;flex-shrink:0;color:var(--text-muted);font-size:0.7rem;">${ts}</span>
+          <span style="width:90px;flex-shrink:0;font-weight:600;color:var(--text-bright);">${escapeHtml(e.user_name)}</span>
+          <span style="width:60px;flex-shrink:0;padding:1px 6px;border-radius:4px;text-align:center;font-size:0.65rem;font-weight:600;text-transform:uppercase;color:#fff;background:${color};">${e.event_type}</span>
+          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-dim);">${escapeHtml(summary)}</span>
+        </div>`;
+    }).join('');
+
+    const hasMore = (_activityOffset + entries.length) < total;
+    const loadMoreBtn = hasMore ? `<div style="text-align:center;padding:12px;"><button class="admin-btn" onclick="_activityOffset+=${_ACTIVITY_LIMIT}; loadAdminActivity(true)">Load More</button></div>` : '';
+
+    if (append) {
+      // Append rows to existing list
+      const list = container.querySelector('.activity-list');
+      if (list) {
+        list.insertAdjacentHTML('beforeend', rows);
+        const oldBtn = container.querySelector('.activity-load-more');
+        if (oldBtn) oldBtn.outerHTML = loadMoreBtn ? `<div class="activity-load-more">${loadMoreBtn}</div>` : '';
+      }
+    } else {
+      container.innerHTML = `
+        ${filterBar}
+        <div class="admin-section">
+          <div class="activity-list">${rows || '<p style="color:var(--text-dim);padding:16px 12px;">No activity yet.</p>'}</div>
+          ${hasMore ? `<div class="activity-load-more">${loadMoreBtn}</div>` : ''}
+        </div>`;
+    }
+  } catch (e) {
+    if (!append) container.innerHTML = '<p style="color:var(--error);padding:12px;">Failed to load activity.</p>';
   }
 }
 
