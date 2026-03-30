@@ -477,7 +477,11 @@ async function initPage() {
           document.getElementById('invite-banner').style.display = 'block';
         }
         if (data.email) {
-          document.getElementById('email-input').value = data.email;
+          const emailInput = document.getElementById('email-input');
+          emailInput.value = data.email;
+          emailInput.readOnly = true;
+          emailInput.style.opacity = '0.7';
+          emailInput.style.cursor = 'not-allowed';
         }
       } else {
         showError('This invitation link is invalid or has expired.');

@@ -18,3 +18,5 @@ httpx
 python-multipart
 fastapi
 uvicorn[standard]
+python-dotenv
+resend

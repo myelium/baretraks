@@ -124,10 +124,10 @@ def send_invite_email(to_email: str, inviter_name: str, token: str) -> bool:
     if not RESEND_API_KEY:
         logger.info("RESEND_API_KEY not set — skipping email to %s", to_email)
         return False
-    import resend
-    resend.api_key = RESEND_API_KEY
-    link = f"{BASE_URL}/login?invite={token}"
     try:
+        import resend
+        resend.api_key = RESEND_API_KEY
+        link = f"{BASE_URL}/login?invite={token}"
         resend.Emails.send({
             "from": EMAIL_FROM,
             "to": [to_email],
@@ -2911,6 +2911,20 @@ def admin_list_invitations(admin: User = Depends(require_admin), db: Session = D
     return {"invitations": [i.to_dict() for i in invites]}
 
 
+@app.delete("/api/admin/invitations/{invitation_id}")
+def admin_delete_invitation(invitation_id: str, admin: User = Depends(require_admin),
+                            db: Session = Depends(get_db)):
+    """Delete a pending invitation, returning the credit to the inviter."""
+    inv = db.query(Invitation).filter(Invitation.id == invitation_id).first()
+    if not inv:
+        raise HTTPException(404, "Invitation not found")
+    if inv.status == "accepted":
+        raise HTTPException(400, "Cannot delete an accepted invitation")
+    db.delete(inv)
+    db.commit()
+    return {"deleted": True}
+
+
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # Votes API
@@ -3347,6 +3361,7 @@ def send_invitations(req: InviteRequest, user: User = Depends(get_current_user),
             continue
         inv = Invitation(inviter_id=user.id, email=email)
         db.add(inv)
+        db.flush()  # generate token from default before sending email
         emailed = send_invite_email(email, user.name or "A friend", inv.token)
         sent.append({"email": email, "token": inv.token, "link": f"/login?invite={inv.token}", "emailed": emailed})
     db.commit()

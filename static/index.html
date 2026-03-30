@@ -1605,6 +1605,18 @@
     color: #d4c8b0;
   }
   .analysis-panel em { color: #e8d5a3; font-style: italic; }
+  .analysis-lyric {
+    display: inline;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text-bright);
+    line-height: 1.4;
+    background: rgba(180, 140, 60, 0.15);
+    padding: 2px 6px;
+    border-radius: 3px;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+  }
   .analysis-header {
     display: flex;
     align-items: baseline;
@@ -2719,6 +2731,8 @@ function _renderAnalysis(data) {
   const text = data.analysis || '';
   const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const formatted = escaped
+    .replace(/&quot;([^&]+?)&quot;/g, '<span class="analysis-lyric">&ldquo;$1&rdquo;</span>')
+    .replace(/"([^"]+?)"/g, '<span class="analysis-lyric">&ldquo;$1&rdquo;</span>')
     .replace(/\*([^*]+)\*/g, '<em>$1</em>')
     .replace(/\n\n/g, '<br><br>')
     .replace(/\n/g, '<br>');
@@ -5467,9 +5481,19 @@ async function loadAdminInvitations() {
           </div>` : ''}
         </div>
         <span class="role-badge" style="color:${statusColor};background:rgba(255,255,255,0.05);">${statusLabel}</span>
+        ${i.status !== 'accepted' ? `<button class="admin-btn danger" onclick="adminDeleteInvitation('${i.id}')" title="Delete invitation">&times;</button>` : ''}
       </div>`;
     }).join('') || '<p style="color:var(--text-dim);padding:16px;">No invitations.</p>'}</div>`;
   } catch (e) { container.innerHTML = '<p style="color:var(--error);padding:12px;">Failed to load invitations.</p>'; }
+}
+
+async function adminDeleteInvitation(invId) {
+  if (!await showConfirm('Delete this invitation? The invitation credit will be returned to the user.')) return;
+  try {
+    const resp = await fetch(`/api/admin/invitations/${invId}`, { method: 'DELETE' });
+    if (!resp.ok) { const d = await resp.json().catch(() => ({})); showAlert(d.detail || 'Failed to delete'); return; }
+    loadAdminInvitations();
+  } catch (e) { showAlert('Error: ' + e.message); }
 }
 
 function copyInviteLink(btn, link) {
