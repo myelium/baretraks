@@ -1,24 +1,19 @@
 """FastAPI web server for the karaoke pipeline."""
 
-import warnings
-warnings.filterwarnings("ignore", message=".*torchaudio.*torchcodec.*")
-
 from dotenv import load_dotenv
 load_dotenv()
 
 import json
 import re
 import secrets
-import subprocess
 import threading
 import time
 import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 
-import imageio_ffmpeg
-import torch
-from fastapi import Depends, FastAPI, HTTPException, Response
+import httpx
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -28,7 +23,7 @@ from auth import (
     create_token, create_user_with_permissions, get_current_user,
     get_optional_user, hash_password, is_admin, require_admin, verify_password,
 )
-from database import SessionLocal, get_db, get_session
+from database import get_db, get_session
 from models import ActivityLog, AppConfig, Comment, Feedback, Invitation, JobMetadata, Playlist, PlaylistItem, User, UserPermissions, Vote, WishlistItem, WishlistVote
 from storage import storage
 
@@ -36,14 +31,7 @@ import logging
 import os
 import shutil
 
-from karaoke.compose import compose
-from karaoke.download import download, download_audio, fetch_metadata
-from karaoke.separate import separate
-from karaoke.subtitles import build_ass, build_srt
-from karaoke.transcribe import transcribe
-from karaoke.translate import translate_srt
-
-FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
+from karaoke.download import fetch_metadata
 JOBS_DIR = Path("output/jobs")
 
 
@@ -60,15 +48,6 @@ def _log_activity(db, user, event_type: str, detail: dict | None = None) -> None
     except Exception:
         pass
 
-
-# --- Compute device (cpu/cuda) ---
-def _detect_device() -> str:
-    env = os.getenv("DEVICE", "auto").lower()
-    if env in ("cpu", "cuda"):
-        return env
-    return "cuda" if torch.cuda.is_available() else "cpu"
-
-DEVICE = _detect_device()
 
 # --- Email via Resend ---
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
@@ -139,27 +118,15 @@ def send_invite_email(to_email: str, inviter_name: str, token: str) -> bool:
         logger.error("Failed to send invite email to %s: %s", to_email, e)
         return False
 
-# Default multipliers (used when no history exists)
-DEFAULT_MULTIPLIERS = {
-    1: 0.1,   # download: ~0.1x audio duration (network-bound)
-    2: 2.5,   # demucs separation
-    3: 2.0,   # whisper transcription
-    4: 0.0,   # subtitles: instant
-    5: 3.0,   # ffmpeg compose
-}
-
 app = FastAPI()
 
 # ---------------------------------------------------------------------------
-# Global job state & learned stats
+# Global job state & worker management
 # ---------------------------------------------------------------------------
 _lock = threading.Lock()
-_job: dict | None = None
-_queue: list[dict] = []  # production queue [{id, url, mode, languages, title, thumbnail, channel, status}]
-_pause_requested = False
-_cancel_requested = False
-# Learned multipliers: step -> ratio of step_duration / audio_duration
-_learned_multipliers: dict[int, float] = {}
+_active_jobs: dict[str, dict] = {}  # job_id -> progress dict (from worker callbacks)
+_queue: list[dict] = []  # production queue
+_worker_states: dict[str, dict] = {}  # worker_id -> {status, last_seen, current_job, ...}
 
 
 def _db_config_get(key: str, default: dict | list | None = None):
@@ -193,46 +160,6 @@ def _db_config_set(key: str, value) -> None:
         db.close()
 
 
-def _load_stats() -> None:
-    """Load historical stats and compute learned multipliers."""
-    global _learned_multipliers
-    stats = _db_config_get("stats", {"history": []})
-    history = stats.get("history", [])
-    if not history:
-        return
-    # Compute average multiplier per step
-    step_ratios: dict[int, list[float]] = {}
-    for entry in history:
-        dur = entry.get("audio_duration", 0)
-        if dur <= 0:
-            continue
-        for step_str, elapsed in entry.get("step_durations", {}).items():
-            step = int(step_str)
-            if step == 4:
-                continue  # subtitles are instant, skip
-            if elapsed > 0:
-                step_ratios.setdefault(step, []).append(elapsed / dur)
-    _learned_multipliers = {
-        step: sum(ratios) / len(ratios)
-        for step, ratios in step_ratios.items()
-        if ratios
-    }
-
-
-def _save_stats(audio_duration: float, step_durations: dict) -> None:
-    """Append this job's timing data to the DB."""
-    stats = _db_config_get("stats", {"history": []})
-    stats.setdefault("history", []).append({
-        "audio_duration": audio_duration,
-        "step_durations": step_durations,
-        "timestamp": _now_iso(),
-    })
-    # Keep last 50 entries to prevent unbounded growth
-    stats["history"] = stats["history"][-50:]
-    _db_config_set("stats", stats)
-    # Reload multipliers with new data
-    _load_stats()
-
 def _save_queue() -> None:
     """Persist queue to DB."""
     _db_config_set("queue", _queue)
@@ -244,159 +171,174 @@ def _load_queue() -> None:
     _queue = _db_config_get("queue", [])
 
 
-_disk_quota_exceeded = False  # set when disk quota blocks production
 
 
-def _get_disk_usage_mb() -> float:
-    """Calculate total disk usage of all job output directories in MB."""
-    total = 0
-    if JOBS_DIR.exists():
-        for d in JOBS_DIR.iterdir():
-            if not d.is_dir():
-                continue
-            for f in d.iterdir():
-                if f.is_file():
-                    total += f.stat().st_size
-    return total / (1024 * 1024)
+# ---------------------------------------------------------------------------
+# Worker management
+# ---------------------------------------------------------------------------
+
+def _load_workers() -> list[dict]:
+    """Load configured workers from DB."""
+    return _db_config_get("workers", [])
 
 
-def _process_next_in_queue() -> None:
-    """Start processing the next queued item if nothing is running.
-    Automatically detects whether to resume from prior progress or start fresh."""
-    global _job, _pause_requested, _disk_quota_exceeded
+def _save_workers(workers: list[dict]) -> None:
+    _db_config_set("workers", workers)
 
-    # Check global disk quota before starting
-    settings = _load_settings()
-    max_disk = settings.get("max_disk_space_mb", 0)
-    if max_disk > 0:
-        usage = _get_disk_usage_mb()
-        if usage >= max_disk:
-            _disk_quota_exceeded = True
-            return  # don't start new jobs
-    _disk_quota_exceeded = False
+
+def _dispatch_next_jobs() -> None:
+    """Dispatch queued jobs to idle workers."""
+    workers = _load_workers()
+    if not workers:
+        return
 
     with _lock:
-        if _job is not None and _job.get("status") == "running":
-            return  # something already running
-        # Find the first "queued" item
-        next_item = None
-        for item in _queue:
-            if item.get("status") == "queued":
-                next_item = item
-                break
-        if not next_item:
+        queued_items = [item for item in _queue if item.get("status") == "queued"]
+        if not queued_items:
             return
-        next_item["status"] = "processing"
-    _pause_requested = False
-    _cancel_requested = False
-    _save_queue()
 
-    url = next_item["url"]
-    mode = next_item.get("mode", "karaoke")
-    languages = next_item.get("languages", [])
-    job_id = next_item["id"]
-    output_dir = JOBS_DIR / job_id
-    output_dir.mkdir(parents=True, exist_ok=True)
+    settings = _load_settings()
 
-    # Check if there's prior work on disk to resume from
-    resume_from = 1
-    prior_data = {}
-    job_json = output_dir / "job.json"
-    if job_json.exists():
+    for item in queued_items:
+        # Find an idle, enabled worker (treat unknown/new workers as potentially idle)
+        idle_worker = None
+        for w in workers:
+            if not w.get("enabled", True):
+                continue
+            wid = w["id"]
+            state = _worker_states.get(wid, {})
+            status = state.get("status", "unknown")
+            if status in ("idle", "unknown"):
+                idle_worker = w
+                break
+
+        if not idle_worker:
+            break  # no idle workers available
+
+        job_id = item["id"]
+        callback_url = settings.get("base_url", BASE_URL)
+
+        payload = {
+            "job_id": job_id,
+            "url": item["url"],
+            "mode": item.get("mode", "karaoke"),
+            "languages": item.get("languages", []),
+            "callback_url": callback_url,
+            "callback_key": idle_worker.get("api_key", ""),
+            "r2_prefix": f"jobs/{job_id}",
+            "title": item.get("title"),
+            "channel": item.get("channel"),
+            "settings": {
+                "feature_lyrics_correction": settings.get("feature_lyrics_correction", True),
+                "feature_translation": settings.get("feature_translation", True),
+                "feature_analysis": settings.get("feature_analysis", True),
+                "demucs_model": settings.get("demucs_model", "htdemucs_ft"),
+                "max_subtitle_languages": settings.get("max_subtitle_languages", 3),
+            },
+        }
+
         try:
-            prior_data = json.loads(job_json.read_text())
-            resume_from = _detect_resume_step(output_dir)
-        except (json.JSONDecodeError, OSError):
-            pass
-
-    step_name = f"Resuming from step {resume_from}" if resume_from > 1 else "Starting"
-
-    _job = {
-        "id": job_id,
-        "url": url,
-        "mode": mode,
-        "languages": languages,
-        "title": next_item.get("title", "Unknown"),
-        "thumbnail": next_item.get("thumbnail"),
-        "channel": next_item.get("channel"),
-        "upload_date": next_item.get("upload_date"),
-        "categories": next_item.get("categories", []),
-        "tags": next_item.get("tags", []),
-        "added_by": next_item.get("added_by"),
-        "added_by_id": next_item.get("added_by_id"),
-        "status": "running",
-        "step": 0,
-        "step_name": step_name,
-        "step_progress": 0.0,
-        "started_at": _now_iso(),
-        "step_started_at": _now_iso(),
-        "finished_at": None,
-        "audio_duration": prior_data.get("audio_duration"),
-        "estimated_total": None,
-        "step_estimates": None,
-        "error": None,
-        "artifacts": prior_data.get("artifacts", {}),
-        "output_dir": str(output_dir),
-    }
-    _save_job_json()
-
-    if mode == "subtitled":
-        thread = threading.Thread(
-            target=_run_subtitled_pipeline,
-            args=(job_id, url, output_dir, languages),
-            daemon=True)
-    elif mode == "both":
-        thread = threading.Thread(
-            target=_run_combined_pipeline,
-            args=(job_id, url, output_dir, languages),
-            daemon=True)
-    else:
-        thread = threading.Thread(
-            target=_run_pipeline,
-            args=(job_id, url, output_dir),
-            kwargs={"resume_from": resume_from},
-            daemon=True)
-    thread.start()
+            headers = {"Content-Type": "application/json"}
+            if idle_worker.get("api_key"):
+                headers["Authorization"] = f"Bearer {idle_worker['api_key']}"
+            resp = httpx.post(
+                f"{idle_worker['url']}/worker/jobs",
+                json=payload, headers=headers, timeout=10,
+            )
+            if resp.status_code == 200:
+                with _lock:
+                    item["status"] = "processing"
+                    item["worker_id"] = idle_worker["id"]
+                    item["dispatched_at"] = _now_iso()
+                    _active_jobs[job_id] = {
+                        "id": job_id,
+                        "status": "running",
+                        "step": 0,
+                        "step_name": "Starting",
+                        "step_progress": 0.0,
+                        "worker_id": idle_worker["id"],
+                        "worker_name": idle_worker.get("name", ""),
+                    }
+                _worker_states.setdefault(idle_worker["id"], {})["status"] = "busy"
+                _save_queue()
+                logger.info("Dispatched job %s to worker %s", job_id, idle_worker.get("name"))
+            elif resp.status_code == 409:
+                # Worker is busy — mark it so we skip it for next items
+                _worker_states.setdefault(idle_worker["id"], {})["status"] = "busy"
+                logger.info("Worker %s is busy", idle_worker.get("name"))
+            else:
+                logger.warning("Worker %s rejected job: %d %s",
+                               idle_worker.get("name"), resp.status_code, resp.text[:100])
+        except Exception as e:
+            logger.warning("Failed to dispatch to worker %s: %s", idle_worker.get("name"), e)
 
 
-def _on_job_finished() -> None:
-    """Called when a job finishes — remove from queue first, then do async work."""
+def _on_job_completed(job_id: str, data: dict) -> None:
+    """Called when a worker reports job completion. Saves metadata to DB and triggers post-processing."""
+    # Find queue item for metadata
+    queue_item = None
     with _lock:
-        job_id = _job["id"] if _job else None
-        job_status = _job.get("status") if _job else None
-        job_title = _job.get("title") if _job else None
-        job_artist = _job.get("artist") or (_job.get("channel") if _job else None)
-        job_url = _job.get("url") if _job else None
-        output_dir = Path(_job["output_dir"]) if _job else None
-        # Remove from queue immediately so the frontend sees a clean state
+        for item in _queue:
+            if item.get("id") == job_id:
+                queue_item = dict(item)
+                break
+        # Remove from queue and active jobs
         _queue[:] = [item for item in _queue if item.get("id") != job_id]
+        _active_jobs.pop(job_id, None)
     _save_queue()
 
-    # Start the next job before doing slow post-processing
-    _process_next_in_queue()
+    # Save to JobMetadata
+    try:
+        db = get_session()
+        meta = db.query(JobMetadata).filter(JobMetadata.job_id == job_id).first()
+        if not meta:
+            meta = JobMetadata(job_id=job_id)
+            db.add(meta)
 
-    # --- Post-completion tasks (run after queue is already updated) ---
+        meta.title = meta.title or (queue_item or {}).get("title")
+        meta.artist = meta.artist or data.get("artist") or (queue_item or {}).get("channel")
+        meta.url = (queue_item or {}).get("url")
+        meta.mode = data.get("mode") or (queue_item or {}).get("mode", "karaoke")
+        meta.languages = json.dumps((queue_item or {}).get("languages", []))
+        meta.thumbnail = (queue_item or {}).get("thumbnail")
+        meta.channel = (queue_item or {}).get("channel")
+        meta.upload_date = (queue_item or {}).get("upload_date")
+        meta.categories = json.dumps((queue_item or {}).get("categories", []))
+        meta.tags = json.dumps((queue_item or {}).get("tags", []))
+        meta.finished_at = data.get("finished_at", _now_iso())
+        meta.audio_duration = data.get("audio_duration")
+        meta.language_detected = data.get("language_detected")
+        meta.status = "done"
+        meta.added_by = (queue_item or {}).get("added_by")
+        meta.added_by_id = (queue_item or {}).get("added_by_id")
+        meta.file_size_bytes = data.get("file_size_bytes")
 
-    # Pre-generate "Between the Lines" analysis for completed jobs
-    if (job_status == "done" and job_id and output_dir
-            and _load_settings().get("feature_analysis", True)):
+        # Lyrics and subtitles from worker
+        if data.get("lyrics"):
+            meta.lyrics = data["lyrics"]
+        if data.get("subtitles"):
+            meta.subtitles = data["subtitles"]
+
+        db.commit()
+        db.close()
+    except Exception as e:
+        logger.error("Failed to save job metadata for %s: %s", job_id, e)
+
+    # Post-completion: generate analysis
+    if _load_settings().get("feature_analysis", True) and data.get("lyrics"):
         try:
-            lyrics_path = output_dir / "lyrics.json"
-            if lyrics_path.exists():
-                words = json.loads(lyrics_path.read_text())
-                lyrics_text = " ".join(w["text"] for w in words)
-                prompts = _load_prompts()
-                custom_prompt = prompts.get("analysis_prompt") or None
-                from karaoke.analyze_lyrics import analyze_lyrics
-                result = analyze_lyrics(lyrics_text, title=job_title,
-                                        artist=job_artist,
-                                        custom_prompt=custom_prompt)
-                _db = SessionLocal()
-                _meta = _db.query(JobMetadata).filter(
-                    JobMetadata.job_id == job_id).first()
-                if not _meta:
-                    _meta = JobMetadata(job_id=job_id)
-                    _db.add(_meta)
+            words = json.loads(data["lyrics"])
+            lyrics_text = " ".join(w["text"] for w in words)
+            prompts = _load_prompts()
+            custom_prompt = prompts.get("analysis_prompt") or None
+            from karaoke.analyze_lyrics import analyze_lyrics
+            title = (queue_item or {}).get("title")
+            artist = data.get("artist") or (queue_item or {}).get("channel")
+            result = analyze_lyrics(lyrics_text, title=title, artist=artist,
+                                    custom_prompt=custom_prompt)
+            _db = get_session()
+            _meta = _db.query(JobMetadata).filter(JobMetadata.job_id == job_id).first()
+            if _meta:
                 _meta.analysis_text = result.get("analysis", "")
                 _meta.analysis_song_info = result.get("song_info", "")
                 if result.get("year"):
@@ -407,15 +349,16 @@ def _on_job_finished() -> None:
                         parts = info.rsplit(" by ", 1)
                         if len(parts) == 2:
                             _meta.artist = parts[1].strip().strip('"')
-                _db.commit()
-                _db.close()
+            _db.commit()
+            _db.close()
         except Exception:
             pass
 
     # Mark matching wishlist items as fulfilled
-    if job_status == "done" and job_id and job_url:
+    job_url = (queue_item or {}).get("url")
+    if job_url:
         try:
-            _db = SessionLocal()
+            _db = get_session()
             wish_items = _db.query(WishlistItem).filter(
                 WishlistItem.url == job_url,
                 WishlistItem.status.in_(["open", "queued"])
@@ -428,103 +371,90 @@ def _on_job_finished() -> None:
         except Exception:
             pass
 
-    # Save full metadata to DB and upload files to R2
-    if job_status == "done" and job_id and output_dir:
-        _persist_job(job_id, output_dir)
+    # Dispatch next queued jobs
+    _dispatch_next_jobs()
 
 
-def _persist_job(job_id: str, output_dir: Path) -> None:
-    """Save job metadata to DB and upload output files to R2 (if configured)."""
-    try:
-        job_json_path = output_dir / "job.json"
-        if not job_json_path.exists():
-            return
-        data = json.loads(job_json_path.read_text())
-
-        # Update JobMetadata with full data
-        db = get_session()
-        meta = db.query(JobMetadata).filter(JobMetadata.job_id == job_id).first()
-        if not meta:
-            meta = JobMetadata(job_id=job_id)
-            db.add(meta)
-        meta.title = meta.title or data.get("title")
-        meta.artist = meta.artist or data.get("artist")
-        meta.url = data.get("url")
-        meta.mode = data.get("mode", "karaoke")
-        meta.languages = json.dumps(data.get("languages") or ([data["language"]] if data.get("language") else []))
-        meta.thumbnail = data.get("thumbnail")
-        meta.channel = data.get("channel")
-        meta.upload_date = data.get("upload_date")
-        meta.categories = json.dumps(data.get("categories", []))
-        meta.tags = json.dumps(data.get("tags", []))
-        meta.finished_at = data.get("finished_at")
-        meta.audio_duration = data.get("audio_duration")
-        meta.language_detected = data.get("language_detected")
-        meta.status = "done"
-        meta.added_by = data.get("added_by")
-        meta.added_by_id = data.get("added_by_id")
-
-        # Save lyrics to DB
-        lyrics_path = output_dir / "lyrics.json"
-        if lyrics_path.exists():
-            meta.lyrics = lyrics_path.read_text()
-
-        # Save subtitles to DB
-        srt_data = {}
-        for srt in output_dir.glob("subtitles_*.srt"):
-            lang = srt.stem.replace("subtitles_", "")
-            srt_data[lang] = srt.read_text()
-        if srt_data:
-            meta.subtitles = json.dumps(srt_data)
-
-        # Upload to R2 if configured
-        if storage.is_r2():
-            output_files = ["karaoke.mp4", "instrumental.mp3", "vocals.mp3", "lyrics.json", "job.json"]
-            total_size = 0
-            for fname in output_files:
-                fpath = output_dir / fname
-                if fpath.exists():
-                    storage.upload(f"jobs/{job_id}/{fname}", fpath)
-                    total_size += fpath.stat().st_size
-            # Upload subtitle files
-            for srt in output_dir.glob("subtitles_*.srt"):
-                storage.upload(f"jobs/{job_id}/{srt.name}", srt)
-                total_size += srt.stat().st_size
-            meta.file_size_bytes = total_size
-            # Clean up local files after R2 upload
-            shutil.rmtree(output_dir, ignore_errors=True)
-        else:
-            total_size = sum(f.stat().st_size for f in output_dir.iterdir() if f.is_file())
-            meta.file_size_bytes = total_size
-
-        db.commit()
-        db.close()
-    except Exception as e:
-        logger.error("Failed to persist job %s: %s", job_id, e)
+def _on_job_failed(job_id: str, error: str) -> None:
+    """Called when a worker reports job failure."""
+    with _lock:
+        for item in _queue:
+            if item.get("id") == job_id:
+                item["status"] = "failed"
+                item["error"] = error
+                item.pop("worker_id", None)
+                break
+        _active_jobs.pop(job_id, None)
+    _save_queue()
+    _dispatch_next_jobs()
 
 
-STEP_NAMES = {
-    1: "Downloading",
-    2: "Separating vocals",
-    3: "Transcribing lyrics",
-    4: "Building subtitles",
-    5: "Composing video",
-}
+def _worker_health_loop() -> None:
+    """Background thread that pings workers every 30 seconds."""
+    while True:
+        time.sleep(30)
+        try:
+            workers = _load_workers()
+            for w in workers:
+                if not w.get("enabled", True):
+                    continue
+                wid = w["id"]
+                try:
+                    headers = {}
+                    if w.get("api_key"):
+                        headers["Authorization"] = f"Bearer {w['api_key']}"
+                    resp = httpx.get(f"{w['url']}/worker/status", headers=headers, timeout=10)
+                    if resp.status_code == 200:
+                        status_data = resp.json()
+                        _worker_states[wid] = {
+                            "status": status_data.get("status", "idle"),
+                            "name": status_data.get("name", w.get("name", "")),
+                            "device": status_data.get("device", "unknown"),
+                            "current_job": status_data.get("current_job"),
+                            "last_seen": _now_iso(),
+                            "online": True,
+                        }
+                    else:
+                        _worker_states[wid] = {
+                            **_worker_states.get(wid, {}),
+                            "online": False,
+                            "status": "offline",
+                            "last_error": f"HTTP {resp.status_code}",
+                        }
+                except Exception as e:
+                    _worker_states[wid] = {
+                        **_worker_states.get(wid, {}),
+                        "online": False,
+                        "status": "offline",
+                        "last_error": str(e),
+                    }
 
-STEP_NAMES_SUBTITLED = {
-    1: "Downloading audio",
-    2: "Transcribing",
-    3: "Translating",
-}
+            # Re-queue jobs from workers that have been offline > 5 min
+            now = datetime.now(timezone.utc)
+            with _lock:
+                for item in _queue:
+                    if item.get("status") != "processing":
+                        continue
+                    wid = item.get("worker_id")
+                    if not wid:
+                        continue
+                    state = _worker_states.get(wid, {})
+                    if state.get("online"):
+                        continue
+                    last_seen = state.get("last_seen")
+                    if last_seen:
+                        ls = datetime.fromisoformat(last_seen)
+                        if (now - ls).total_seconds() > 300:
+                            logger.warning("Worker %s offline > 5min, re-queuing job %s",
+                                           wid, item.get("id"))
+                            item["status"] = "queued"
+                            item.pop("worker_id", None)
+                _save_queue()
 
-STEP_NAMES_BOTH = {
-    1: "Downloading",
-    2: "Separating vocals",
-    3: "Transcribing lyrics",
-    4: "Building subtitles",
-    5: "Composing video",
-    6: "Translating",
-}
+            # Try dispatching if we have queued items and idle workers
+            _dispatch_next_jobs()
+        except Exception as e:
+            logger.error("Worker health check error: %s", e)
 
 VALID_MODES = ("karaoke", "subtitled", "both")
 
@@ -563,704 +493,182 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _get_audio_duration(audio_path: Path) -> float:
-    """Probe audio duration in seconds using ffprobe."""
-    # Use ffprobe from PATH (installed via homebrew / system package)
-    result = subprocess.run(
-        [
-            "ffprobe",
-            "-v", "error",
-            "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1",
-            str(audio_path),
-        ],
-        capture_output=True,
-        text=True,
-    )
-    return float(result.stdout.strip())
 
 
-def _convert_to_mp3(wav_path: Path, mp3_path: Path) -> None:
-    """Convert a WAV file to MP3."""
-    subprocess.run(
-        [FFMPEG, "-y", "-i", str(wav_path), "-codec:a", "libmp3lame",
-         "-b:a", "192k", str(mp3_path)],
-        check=True,
-        capture_output=True,
-    )
 
 
-def _words_to_segments(words):
-    """Re-segment a flat word list into natural segments based on timing gaps."""
-    from karaoke.transcribe import Segment, Word as TWord
-    if not words:
-        return []
-    SEGMENT_GAP = 1.0  # seconds — gap between words that starts a new segment
-    segments = []
-    current = [words[0]]
-    for i in range(1, len(words)):
-        gap = words[i].start - words[i - 1].end
-        if gap >= SEGMENT_GAP:
-            segments.append(Segment(
-                start=current[0].start, end=current[-1].end, words=current))
-            current = [words[i]]
-        else:
-            current.append(words[i])
-    if current:
-        segments.append(Segment(
-            start=current[0].start, end=current[-1].end, words=current))
-    return segments
+# ---------------------------------------------------------------------------
+# Worker callback endpoints (called by workers to report progress/completion)
+# ---------------------------------------------------------------------------
+
+def _verify_worker_key(request) -> bool:
+    """Check if the request comes from a configured worker."""
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        key = auth[7:]
+    else:
+        key = ""
+    workers = _load_workers()
+    if not workers:
+        return False
+    # If the key matches any worker's api_key (including empty matching empty)
+    return any(w.get("api_key", "") == key for w in workers)
 
 
-def _compute_estimates(audio_duration: float) -> list[float]:
-    """Return per-step estimated durations in seconds (indices 0-4 for steps 1-5)."""
-    def _mult(step: int) -> float:
-        return _learned_multipliers.get(step, DEFAULT_MULTIPLIERS[step])
-    return [
-        audio_duration * _mult(1),   # step 1: download
-        audio_duration * _mult(2),   # step 2: demucs
-        audio_duration * _mult(3),   # step 3: whisper
-        1.0,                         # step 4: subtitles (always instant)
-        audio_duration * _mult(5),   # step 5: compose
-    ]
-
-
-def _update_job(**kwargs) -> None:
+@app.post("/api/worker/progress")
+async def worker_progress(request: Request):
+    """Receive progress update from a worker."""
+    if not _verify_worker_key(request):
+        raise HTTPException(401, "Invalid worker key")
+    data = await request.json()
+    job_id = data.get("job_id")
+    if not job_id:
+        raise HTTPException(400, "job_id required")
     with _lock:
-        if _job is not None:
-            _job.update(kwargs)
-
-
-def _save_job_json() -> None:
-    """Persist job metadata to disk for crash recovery."""
-    with _lock:
-        if _job is None:
-            return
-        snapshot = dict(_job)
-    job_json = Path(snapshot["output_dir"]) / "job.json"
-    job_json.write_text(json.dumps(snapshot, default=str))
-
-
-def _check_pause() -> bool:
-    """Check if pause or cancel was requested. Returns True to stop the pipeline."""
-    if _cancel_requested:
-        _update_job(status="failed", error="Cancelled by user", finished_at=_now_iso())
-        _save_job_json()
-        # Remove from queue and clean up work dir
-        with _lock:
-            job_id = _job["id"] if _job else None
-            _queue[:] = [i for i in _queue if i.get("id") != job_id]
-        _save_queue()
-        if _job:
-            work_dir = Path(_job["output_dir"]) / "work"
-            _cleanup_work_dir(work_dir)
-            # Remove the entire job directory since it was cancelled
-            job_dir = Path(_job["output_dir"])
-            if job_dir.exists():
-                shutil.rmtree(job_dir, ignore_errors=True)
-        _process_next_in_queue()
-        return True
-    if _pause_requested:
-        _update_job(status="paused", finished_at=_now_iso())
-        _save_job_json()
-        with _lock:
-            job_id = _job["id"] if _job else None
-            for item in _queue:
-                if item.get("id") == job_id:
-                    item["status"] = "paused"
-                    break
-        _save_queue()
-        return True
-    return False
-
-
-def _cleanup_work_dir(work_dir: Path) -> None:
-    """Remove the work directory to free disk space after a successful job."""
-    if work_dir.exists():
-        shutil.rmtree(work_dir, ignore_errors=True)
-
-
-def _detect_resume_step(output_dir: Path) -> int:
-    """Detect which step to resume from based on existing files on disk."""
-    work_dir = output_dir / "work"
-    if (output_dir / "karaoke.mp4").exists():
-        return 6  # all done
-    subtitles_path = work_dir / "karaoke.ass"
-    instrumental = output_dir / "instrumental.mp3"
-    vocals = output_dir / "vocals.mp3"
-    if subtitles_path.exists() and instrumental.exists():
-        return 5  # resume from compose
-    if (output_dir / "lyrics.json").exists():
-        return 4  # resume from subtitles
-    if instrumental.exists() and vocals.exists():
-        return 3  # resume from transcribe
-    if (work_dir / "video.mp4").exists() and (work_dir / "audio.wav").exists():
-        return 2  # resume from separate
-    return 1  # start from beginning
-
-
-def _run_pipeline(job_id: str, url: str, output_dir: Path,
-                  resume_from: int = 1) -> None:
-    """Run the full karaoke pipeline in a background thread."""
-    try:
-        device = DEVICE
-        demucs_model = _load_settings().get("demucs_model", "htdemucs_ft")
-        work_dir = output_dir / "work"
-        work_dir.mkdir(parents=True, exist_ok=True)
-
-        video_path = work_dir / "video.mp4"
-        audio_path = work_dir / "audio.wav"
-        instrumental_mp3 = output_dir / "instrumental.mp3"
-        vocals_mp3 = output_dir / "vocals.mp3"
-        subtitles_path = work_dir / "karaoke.ass"
-        output_path = output_dir / "karaoke.mp4"
-
-        step_durations: dict[str, float] = {}  # step -> actual seconds
-
-        # --- Step 1: Download ---
-        if resume_from <= 1:
-            t0 = time.monotonic()
-            _update_job(step=1, step_name=STEP_NAMES[1], step_progress=0.0,
-                         step_started_at=_now_iso())
-            _save_job_json()
-
-            def _dl_progress(pct: float) -> None:
-                _update_job(step_progress=pct)
-
-            video_path, audio_path = download(url, work_dir, progress_callback=_dl_progress)
-            step_durations["1"] = time.monotonic() - t0
-            _update_job(step_progress=1.0, artifacts={
-                1: [{"name": "video.mp4", "path": "work/video.mp4"}],
-            })
+        if job_id in _active_jobs:
+            _active_jobs[job_id].update(data)
         else:
-            _update_job(step=1, step_name=STEP_NAMES[1], step_progress=1.0,
-                         artifacts={
-                             1: [{"name": "video.mp4", "path": "work/video.mp4"}],
-                         })
-
-        # Compute time estimates from audio duration
-        audio_duration = _get_audio_duration(audio_path)
-        estimates = _compute_estimates(audio_duration)
-        if resume_from <= 1:
-            # Replace estimate with actual for step 1
-            estimates[0] = step_durations.get("1", estimates[0])
-        else:
-            estimates[0] = 0
-        for i in range(1, resume_from - 1):
-            estimates[i] = 0
-        _update_job(
-            audio_duration=audio_duration,
-            step_estimates=estimates,
-            estimated_total=sum(estimates),
-        )
-
-        # --- Step 2: Separate ---
-        if _check_pause(): return
-        if resume_from <= 2:
-            t0 = time.monotonic()
-            _update_job(step=2, step_name=STEP_NAMES[2], step_progress=0.0,
-                         step_started_at=_now_iso())
-            _save_job_json()
-            instrumental_wav, vocals_wav = separate(audio_path, work_dir / "demucs", device=device, model=demucs_model)
-            _convert_to_mp3(instrumental_wav, instrumental_mp3)
-            _convert_to_mp3(vocals_wav, vocals_mp3)
-            instrumental_wav.unlink(missing_ok=True)
-            vocals_wav.unlink(missing_ok=True)
-            # Keep audio_path — needed for transcription (better quality than separated vocals)
-            step_durations["2"] = time.monotonic() - t0
-            with _lock:
-                artifacts = dict(_job.get("artifacts", {}))
-            artifacts[2] = [
-                {"name": "instrumental.mp3", "path": "instrumental.mp3"},
-                {"name": "vocals.mp3", "path": "vocals.mp3"},
-            ]
-            _update_job(step_progress=1.0, artifacts=artifacts)
-        else:
-            with _lock:
-                artifacts = dict(_job.get("artifacts", {}))
-            artifacts[2] = [
-                {"name": "instrumental.mp3", "path": "instrumental.mp3"},
-                {"name": "vocals.mp3", "path": "vocals.mp3"},
-            ]
-            _update_job(step=2, step_name=STEP_NAMES[2], step_progress=1.0,
-                         artifacts=artifacts)
-
-        # --- Step 3: Transcribe ---
-        if _check_pause(): return
-        segments = None
-        if resume_from <= 3:
-            t0 = time.monotonic()
-            _update_job(step=3, step_name=STEP_NAMES[3], step_progress=0.0,
-                         step_started_at=_now_iso())
-            _save_job_json()
-            # Transcribe from original audio (full mix) — much more accurate than
-            # separated vocals which can have artifacts that confuse Whisper
-            transcribe_path = audio_path if audio_path.exists() else vocals_mp3
-            segments, detected_lang = transcribe(transcribe_path, device=device)
-            # Clean up original audio now that transcription is done
-            if audio_path.exists() and audio_path != vocals_mp3:
-                audio_path.unlink(missing_ok=True)
-            _update_job(language_detected=detected_lang)
-            _save_job_json()
-            words_list = []
-            for seg in segments:
-                for w in seg.words:
-                    words_list.append({"text": w.text, "start": w.start, "end": w.end})
-
-            # Correct lyrics using LLM knowledge of the song
-            if _load_settings().get("feature_lyrics_correction", True):
-                _update_job(step_name="Correcting lyrics", step_progress=0.8)
-                _save_job_json()
-                try:
-                    from karaoke.correct_lyrics import correct_lyrics
-                    with _lock:
-                        job_title = _job.get("title") if _job else None
-                        job_channel = _job.get("channel") if _job else None
-                    correction = correct_lyrics(words_list, title=job_title,
-                                                artist=job_channel)
-                    words_list = correction["words"]
-                    if correction.get("identified_artist"):
-                        _update_job(artist=correction["identified_artist"])
-                        _save_job_json()
-                        try:
-                            _db = SessionLocal()
-                            _meta = _db.query(JobMetadata).filter(
-                                JobMetadata.job_id == _job["id"]).first()
-                            if not _meta:
-                                _meta = JobMetadata(job_id=_job["id"])
-                                _db.add(_meta)
-                            if not _meta.artist:
-                                _meta.artist = correction["identified_artist"]
-                            _db.commit()
-                            _db.close()
-                        except Exception:
-                            pass
-                except Exception:
-                    pass  # keep original transcription on failure
-
-            (output_dir / "lyrics.json").write_text(json.dumps(words_list))
-
-            # Rebuild segments from corrected words, using natural timing
-            # gaps to create proper segment boundaries (not one giant segment)
-            from karaoke.transcribe import Segment, Word as TWord
-            corrected_words = [TWord(text=w["text"], start=w["start"], end=w["end"])
-                               for w in words_list]
-            segments = _words_to_segments(corrected_words)
-
-            step_durations["3"] = time.monotonic() - t0
-            with _lock:
-                artifacts = dict(_job.get("artifacts", {}))
-            artifacts[3] = [{"name": "lyrics.json", "path": "lyrics.json"}]
-            _update_job(step_progress=1.0, artifacts=artifacts)
-        else:
-            with _lock:
-                artifacts = dict(_job.get("artifacts", {}))
-            artifacts[3] = [{"name": "lyrics.json", "path": "lyrics.json"}]
-            _update_job(step=3, step_name=STEP_NAMES[3], step_progress=1.0,
-                         artifacts=artifacts)
-
-        # --- Step 4: Subtitles ---
-        if _check_pause(): return
-        if resume_from <= 4:
-            t0 = time.monotonic()
-            _update_job(step=4, step_name=STEP_NAMES[4], step_progress=0.0,
-                         step_started_at=_now_iso())
-            if segments is None:
-                from karaoke.transcribe import Word as TWord
-                lyrics = json.loads((output_dir / "lyrics.json").read_text())
-                words = [TWord(text=w["text"], start=w["start"], end=w["end"]) for w in lyrics]
-                segments = _words_to_segments(words)
-            build_ass(segments, subtitles_path)
-            step_durations["4"] = time.monotonic() - t0
-            with _lock:
-                artifacts = dict(_job.get("artifacts", {}))
-            artifacts[4] = []
-            _update_job(step_progress=1.0, artifacts=artifacts)
-        else:
-            with _lock:
-                artifacts = dict(_job.get("artifacts", {}))
-            artifacts[4] = []
-            _update_job(step=4, step_name=STEP_NAMES[4], step_progress=1.0,
-                         artifacts=artifacts)
-
-        # --- Step 5: Compose ---
-        if _check_pause(): return
-        if resume_from <= 5:
-            t0 = time.monotonic()
-            _update_job(step=5, step_name=STEP_NAMES[5], step_progress=0.0,
-                         step_started_at=_now_iso())
-            _save_job_json()
-            if output_path.exists():
-                output_path.unlink()
-
-            def _compose_progress(pct: float) -> None:
-                _update_job(step_progress=pct)
-
-            compose(video_path, instrumental_mp3, subtitles_path, output_path,
-                    duration=audio_duration, progress_callback=_compose_progress)
-            step_durations["5"] = time.monotonic() - t0
-            _update_job(step_progress=1.0)
-
-        with _lock:
-            artifacts = dict(_job.get("artifacts", {}))
-        artifacts[5] = [{"name": "karaoke.mp4", "path": "karaoke.mp4"}]
-        _update_job(artifacts=artifacts)
-
-        # Save timing stats for future estimation
-        if audio_duration > 0 and step_durations:
-            _save_stats(audio_duration, step_durations)
-
-        # Clean up work directory to save disk space
-        _cleanup_work_dir(work_dir)
-
-        _update_job(status="done", finished_at=_now_iso(),
-                    step_durations=step_durations)
-        _save_job_json()
-        _on_job_finished()
-
-    except Exception as e:
-        logger.error("Pipeline failed for %s: %s", job_id, e, exc_info=True)
-        _update_job(status="failed", error=str(e), finished_at=_now_iso())
-        _save_job_json()
-        _on_job_finished()
+            _active_jobs[job_id] = data
+    return {"ok": True}
 
 
-def _run_subtitled_pipeline(job_id: str, url: str, output_dir: Path,
-                            languages: list[str] | None = None) -> None:
-    """Run the subtitled video pipeline (audio-only download + multi-language transcription)."""
-    if not languages:
-        languages = []
-    try:
-        device = DEVICE
-        work_dir = output_dir / "work"
-        work_dir.mkdir(parents=True, exist_ok=True)
+@app.post("/api/worker/complete")
+async def worker_complete(request: Request):
+    """Receive job completion from a worker."""
+    if not _verify_worker_key(request):
+        raise HTTPException(401, "Invalid worker key")
+    data = await request.json()
+    job_id = data.get("job_id")
+    if not job_id:
+        raise HTTPException(400, "job_id required")
+    logger.info("Worker completed job %s", job_id)
+    # Run in background to avoid blocking the worker
+    threading.Thread(target=_on_job_completed, args=(job_id, data), daemon=True).start()
+    return {"ok": True}
 
-        audio_path = work_dir / "audio.wav"
-        step_durations: dict[str, float] = {}
-        num_langs = len(languages)
 
-        # --- Step 1: Download audio only ---
-        t0 = time.monotonic()
-        _update_job(step=1, step_name=STEP_NAMES_SUBTITLED[1], step_progress=0.0,
-                     step_started_at=_now_iso())
-        _save_job_json()
+@app.post("/api/worker/failed")
+async def worker_failed(request: Request):
+    """Receive job failure from a worker."""
+    if not _verify_worker_key(request):
+        raise HTTPException(401, "Invalid worker key")
+    data = await request.json()
+    job_id = data.get("job_id")
+    error = data.get("error", "Unknown error")
+    if not job_id:
+        raise HTTPException(400, "job_id required")
+    logger.warning("Worker reported failure for job %s: %s", job_id, error)
+    _on_job_failed(job_id, error)
+    return {"ok": True}
 
-        def _dl_progress(pct: float) -> None:
-            _update_job(step_progress=pct)
 
-        audio_path = download_audio(url, work_dir, progress_callback=_dl_progress)
-        step_durations["1"] = time.monotonic() - t0
+# ---------------------------------------------------------------------------
+# Admin worker management endpoints
+# ---------------------------------------------------------------------------
 
-        audio_duration = _get_audio_duration(audio_path)
-        # Rough estimate: transcription takes ~2x audio duration per language
-        est_transcribe = audio_duration * 2.0 * max(num_langs, 1)
-        _update_job(
-            step_progress=1.0,
-            audio_duration=audio_duration,
-            step_estimates=[step_durations["1"], est_transcribe],
-            estimated_total=step_durations["1"] + est_transcribe,
-            artifacts={1: []},
-        )
-
-        # --- Step 2: Transcribe in source language (Whisper auto-detect) ---
-        if _check_pause(): return
-        t0 = time.monotonic()
-        _update_job(step=2, step_name=STEP_NAMES_SUBTITLED[2], step_progress=0.0,
-                     step_started_at=_now_iso())
-        _save_job_json()
-
-        # Whisper transcribes in the original language (what it does best)
-        segments, detected_lang = transcribe(audio_path, device=device)
-        _update_job(language_detected=detected_lang)
-        _save_job_json()
-
-        # Save lyrics.json from the source-language transcription
-        words_list = []
-        for seg in segments:
-            for w in seg.words:
-                words_list.append({"text": w.text, "start": w.start, "end": w.end})
-        (output_dir / "lyrics.json").write_text(json.dumps(words_list))
-
-        # Generate source-language SRT (used as base for Claude translations)
-        source_srt_path = output_dir / "subtitles_source.srt"
-        build_srt(segments, source_srt_path)
-
-        step_durations["2"] = time.monotonic() - t0
-        srt_artifacts = []
-        _update_job(step_progress=1.0, artifacts={
-            1: [],
-            2: [{"name": "lyrics.json", "path": "lyrics.json"}],
+@app.get("/api/admin/workers")
+def admin_list_workers(admin: User = Depends(require_admin)):
+    """List configured workers with live status."""
+    workers = _load_workers()
+    result = []
+    for w in workers:
+        state = _worker_states.get(w["id"], {})
+        result.append({
+            **w,
+            "api_key": "***" if w.get("api_key") else "",  # don't expose keys
+            "status": state.get("status", "unknown"),
+            "device": state.get("device", "unknown"),
+            "online": state.get("online", False),
+            "last_seen": state.get("last_seen"),
+            "current_job": state.get("current_job"),
         })
-
-        # --- Step 3: Translate to all target languages via Claude API ---
-        if _check_pause(): return
-        if languages and _load_settings().get("feature_translation", True):
-            t0 = time.monotonic()
-            source_srt_text = source_srt_path.read_text()
-
-            for i, lang in enumerate(languages):
-                target_name = LANG_FULL_NAMES.get(lang, lang)
-                label = (f"Translating to {target_name}"
-                         f" ({i+1} of {len(languages)})" if len(languages) > 1
-                         else f"Translating to {target_name}")
-                _update_job(step=3, step_name=label,
-                             step_progress=i / len(languages),
-                             step_started_at=_now_iso())
-                _save_job_json()
-
-                with _lock:
-                    job_title = _job.get("title") if _job else None
-                    job_channel = _job.get("channel") if _job else None
-                translated_srt = translate_srt(source_srt_text, target_name,
-                                               title=job_title, artist=job_channel)
-                srt_name = f"subtitles_{lang}.srt"
-                (output_dir / srt_name).write_text(translated_srt)
-                srt_artifacts.append({"name": srt_name, "path": srt_name})
-
-            step_durations["3"] = time.monotonic() - t0
-            _update_job(step_progress=1.0, artifacts={
-                1: [],
-                2: srt_artifacts + [{"name": "lyrics.json", "path": "lyrics.json"}],
-            })
-
-        # Clean up intermediate source SRT (keep only the per-language ones)
-        source_srt_path.unlink(missing_ok=True)
-
-        # Clean up work directory
-        _cleanup_work_dir(work_dir)
-
-        _update_job(status="done", finished_at=_now_iso(),
-                    step_durations=step_durations)
-        _save_job_json()
-        _on_job_finished()
-
-    except Exception as e:
-        logger.error("Subtitled pipeline failed for %s: %s", job_id, e, exc_info=True)
-        _update_job(status="failed", error=str(e), finished_at=_now_iso())
-        _save_job_json()
-        _on_job_finished()
+    return {"workers": result}
 
 
-def _run_combined_pipeline(job_id: str, url: str, output_dir: Path,
-                           languages: list[str] | None = None) -> None:
-    """Run karaoke + subtitles in a single pipeline (6 steps)."""
-    if not languages:
-        languages = []
+class WorkerCreateRequest(BaseModel):
+    name: str
+    url: str
+    api_key: str = ""
+
+
+@app.post("/api/admin/workers")
+def admin_add_worker(req: WorkerCreateRequest, admin: User = Depends(require_admin)):
+    workers = _load_workers()
+    worker = {
+        "id": f"w-{secrets.token_hex(4)}",
+        "name": req.name,
+        "url": req.url.rstrip("/"),
+        "api_key": req.api_key,
+        "enabled": True,
+    }
+    workers.append(worker)
+    _save_workers(workers)
+    return {"worker": {**worker, "api_key": "***" if worker["api_key"] else ""}}
+
+
+@app.put("/api/admin/workers/{worker_id}")
+def admin_update_worker(worker_id: str, req: WorkerCreateRequest,
+                        admin: User = Depends(require_admin)):
+    workers = _load_workers()
+    for w in workers:
+        if w["id"] == worker_id:
+            w["name"] = req.name
+            w["url"] = req.url.rstrip("/")
+            if req.api_key and req.api_key != "***":
+                w["api_key"] = req.api_key
+            _save_workers(workers)
+            return {"updated": True}
+    raise HTTPException(404, "Worker not found")
+
+
+@app.delete("/api/admin/workers/{worker_id}")
+def admin_delete_worker(worker_id: str, admin: User = Depends(require_admin)):
+    workers = _load_workers()
+    workers = [w for w in workers if w["id"] != worker_id]
+    _save_workers(workers)
+    _worker_states.pop(worker_id, None)
+    return {"deleted": True}
+
+
+@app.post("/api/admin/workers/{worker_id}/test")
+def admin_test_worker(worker_id: str, admin: User = Depends(require_admin)):
+    """Ping a worker to test connectivity."""
+    workers = _load_workers()
+    worker = next((w for w in workers if w["id"] == worker_id), None)
+    if not worker:
+        raise HTTPException(404, "Worker not found")
     try:
-        device = DEVICE
-        demucs_model = _load_settings().get("demucs_model", "htdemucs_ft")
-        work_dir = output_dir / "work"
-        work_dir.mkdir(parents=True, exist_ok=True)
-
-        video_path = work_dir / "video.mp4"
-        audio_path = work_dir / "audio.wav"
-        instrumental_mp3 = output_dir / "instrumental.mp3"
-        vocals_mp3 = output_dir / "vocals.mp3"
-        subtitles_path = work_dir / "karaoke.ass"
-        output_path = output_dir / "karaoke.mp4"
-
-        step_durations: dict[str, float] = {}
-
-        # --- Step 1: Download ---
-        t0 = time.monotonic()
-        _update_job(step=1, step_name=STEP_NAMES_BOTH[1], step_progress=0.0,
-                     step_started_at=_now_iso())
-        _save_job_json()
-
-        def _dl_progress(pct: float) -> None:
-            _update_job(step_progress=pct)
-
-        video_path, audio_path = download(url, work_dir, progress_callback=_dl_progress)
-        step_durations["1"] = time.monotonic() - t0
-        _update_job(step_progress=1.0, artifacts={
-            1: [{"name": "video.mp4", "path": "work/video.mp4"}],
-        })
-
-        # Compute time estimates
-        audio_duration = _get_audio_duration(audio_path)
-        estimates = _compute_estimates(audio_duration)
-        # Add estimate for step 6 (translation)
-        est_translate = audio_duration * 2.0 * max(len(languages), 1)
-        estimates.append(est_translate)
-        estimates[0] = step_durations.get("1", estimates[0])
-        _update_job(
-            audio_duration=audio_duration,
-            step_estimates=estimates,
-            estimated_total=sum(estimates),
-        )
-
-        # --- Step 2: Separate ---
-        if _check_pause(): return
-        t0 = time.monotonic()
-        _update_job(step=2, step_name=STEP_NAMES_BOTH[2], step_progress=0.0,
-                     step_started_at=_now_iso())
-        _save_job_json()
-        instrumental_wav, vocals_wav = separate(audio_path, work_dir / "demucs", device=device, model=demucs_model)
-        _convert_to_mp3(instrumental_wav, instrumental_mp3)
-        _convert_to_mp3(vocals_wav, vocals_mp3)
-        instrumental_wav.unlink(missing_ok=True)
-        vocals_wav.unlink(missing_ok=True)
-        # Keep audio_path — needed for transcription
-        step_durations["2"] = time.monotonic() - t0
-        with _lock:
-            artifacts = dict(_job.get("artifacts", {}))
-        artifacts[2] = [
-            {"name": "instrumental.mp3", "path": "instrumental.mp3"},
-            {"name": "vocals.mp3", "path": "vocals.mp3"},
-        ]
-        _update_job(step_progress=1.0, artifacts=artifacts)
-
-        # --- Step 3: Transcribe ---
-        if _check_pause(): return
-        t0 = time.monotonic()
-        _update_job(step=3, step_name=STEP_NAMES_BOTH[3], step_progress=0.0,
-                     step_started_at=_now_iso())
-        _save_job_json()
-        transcribe_path = audio_path if audio_path.exists() else vocals_mp3
-        segments, detected_lang = transcribe(transcribe_path, device=device)
-        if audio_path.exists() and audio_path != vocals_mp3:
-            audio_path.unlink(missing_ok=True)
-        _update_job(language_detected=detected_lang)
-        _save_job_json()
-        words_list = []
-        for seg in segments:
-            for w in seg.words:
-                words_list.append({"text": w.text, "start": w.start, "end": w.end})
-
-        # Correct lyrics using LLM knowledge of the song
-        if _load_settings().get("feature_lyrics_correction", True):
-            _update_job(step_name="Correcting lyrics", step_progress=0.8)
-            _save_job_json()
-            try:
-                from karaoke.correct_lyrics import correct_lyrics
-                with _lock:
-                    job_title = _job.get("title") if _job else None
-                    job_channel = _job.get("channel") if _job else None
-                correction = correct_lyrics(words_list, title=job_title,
-                                            artist=job_channel)
-                words_list = correction["words"]
-                if correction.get("identified_artist"):
-                    _update_job(artist=correction["identified_artist"])
-                    _save_job_json()
-                    try:
-                        _db = SessionLocal()
-                        _meta = _db.query(JobMetadata).filter(
-                            JobMetadata.job_id == _job["id"]).first()
-                        if not _meta:
-                            _meta = JobMetadata(job_id=_job["id"])
-                            _db.add(_meta)
-                        if not _meta.artist:
-                            _meta.artist = correction["identified_artist"]
-                        _db.commit()
-                        _db.close()
-                    except Exception:
-                        pass
-            except Exception:
-                pass  # keep original transcription on failure
-
-        (output_dir / "lyrics.json").write_text(json.dumps(words_list))
-
-        # Rebuild segments from corrected words
-        from karaoke.transcribe import Segment, Word as TWord
-        corrected_words = [TWord(text=w["text"], start=w["start"], end=w["end"])
-                           for w in words_list]
-        if corrected_words:
-            segments = [Segment(start=corrected_words[0].start,
-                                end=corrected_words[-1].end,
-                                words=corrected_words)]
-        else:
-            segments = []
-
-        step_durations["3"] = time.monotonic() - t0
-        with _lock:
-            artifacts = dict(_job.get("artifacts", {}))
-        artifacts[3] = [{"name": "lyrics.json", "path": "lyrics.json"}]
-        _update_job(step_progress=1.0, artifacts=artifacts)
-
-        # --- Step 4: Build ASS subtitles ---
-        if _check_pause(): return
-        t0 = time.monotonic()
-        _update_job(step=4, step_name=STEP_NAMES_BOTH[4], step_progress=0.0,
-                     step_started_at=_now_iso())
-        build_ass(segments, subtitles_path)
-        step_durations["4"] = time.monotonic() - t0
-        with _lock:
-            artifacts = dict(_job.get("artifacts", {}))
-        artifacts[4] = []
-        _update_job(step_progress=1.0, artifacts=artifacts)
-
-        # --- Step 5: Compose video ---
-        if _check_pause(): return
-        t0 = time.monotonic()
-        _update_job(step=5, step_name=STEP_NAMES_BOTH[5], step_progress=0.0,
-                     step_started_at=_now_iso())
-        _save_job_json()
-        if output_path.exists():
-            output_path.unlink()
-
-        def _compose_progress(pct: float) -> None:
-            _update_job(step_progress=pct)
-
-        compose(video_path, instrumental_mp3, subtitles_path, output_path,
-                duration=audio_duration, progress_callback=_compose_progress)
-        step_durations["5"] = time.monotonic() - t0
-        _update_job(step_progress=1.0)
-
-        # --- Step 6: Translate subtitles ---
-        if _check_pause(): return
-        srt_artifacts = []
-        if languages and _load_settings().get("feature_translation", True):
-            t0 = time.monotonic()
-            # Build source SRT from transcription for Claude translation
-            source_srt_path = output_dir / "subtitles_source.srt"
-            build_srt(segments, source_srt_path)
-            source_srt_text = source_srt_path.read_text()
-
-            for i, lang in enumerate(languages):
-                target_name = LANG_FULL_NAMES.get(lang, lang)
-                label = (f"Translating to {target_name}"
-                         f" ({i+1} of {len(languages)})" if len(languages) > 1
-                         else f"Translating to {target_name}")
-                _update_job(step=6, step_name=label,
-                             step_progress=i / len(languages),
-                             step_started_at=_now_iso())
-                _save_job_json()
-
-                with _lock:
-                    job_title = _job.get("title") if _job else None
-                    job_channel = _job.get("channel") if _job else None
-                translated_srt = translate_srt(source_srt_text, target_name,
-                                               title=job_title, artist=job_channel)
-                srt_name = f"subtitles_{lang}.srt"
-                (output_dir / srt_name).write_text(translated_srt)
-                srt_artifacts.append({"name": srt_name, "path": srt_name})
-
-            step_durations["6"] = time.monotonic() - t0
-            source_srt_path.unlink(missing_ok=True)
-
-        with _lock:
-            artifacts = dict(_job.get("artifacts", {}))
-        artifacts[5] = [{"name": "karaoke.mp4", "path": "karaoke.mp4"}]
-        if srt_artifacts:
-            artifacts[6] = srt_artifacts
-        _update_job(step_progress=1.0, artifacts=artifacts)
-
-        # Save timing stats
-        if audio_duration > 0 and step_durations:
-            _save_stats(audio_duration, step_durations)
-
-        _cleanup_work_dir(work_dir)
-
-        _update_job(status="done", finished_at=_now_iso(),
-                    step_durations=step_durations)
-        _save_job_json()
-        _on_job_finished()
-
+        headers = {}
+        if worker.get("api_key"):
+            headers["Authorization"] = f"Bearer {worker['api_key']}"
+        resp = httpx.get(f"{worker['url']}/worker/status", headers=headers, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            # Update worker state immediately so UI reflects it
+            _worker_states[worker_id] = {
+                "status": data.get("status", "idle"),
+                "name": data.get("name", worker.get("name", "")),
+                "device": data.get("device", "unknown"),
+                "current_job": data.get("current_job"),
+                "last_seen": _now_iso(),
+                "online": True,
+            }
+            return {"success": True, "status": data}
+        return {"success": False, "error": f"HTTP {resp.status_code}"}
     except Exception as e:
-        logger.error("Combined pipeline failed for %s: %s", job_id, e, exc_info=True)
-        _update_job(status="failed", error=str(e), finished_at=_now_iso())
-        _save_job_json()
-        _on_job_finished()
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/admin/workers/{worker_id}/toggle")
+def admin_toggle_worker(worker_id: str, admin: User = Depends(require_admin)):
+    """Enable/disable a worker."""
+    workers = _load_workers()
+    for w in workers:
+        if w["id"] == worker_id:
+            w["enabled"] = not w.get("enabled", True)
+            _save_workers(workers)
+            return {"enabled": w["enabled"]}
+    raise HTTPException(404, "Worker not found")
 
 
 # ---------------------------------------------------------------------------
@@ -1284,7 +692,7 @@ def _run_migrations() -> None:
         # Backfill in a separate transaction (no lock conflict)
         import secrets as _sec
         from datetime import timedelta
-        db = SessionLocal()
+        db = get_session()
         from models import Invitation as InvModel
         for inv in db.query(InvModel).all():
             inv.token = _sec.token_urlsafe(32)
@@ -1318,7 +726,7 @@ def _run_migrations() -> None:
                 conn.execute(text("ALTER TABLE job_metadata ADD COLUMN year VARCHAR(10)"))
             # Backfill year from existing analysis_song_info, e.g. "Alone by Heart (1987)"
             import re as _re
-            _db = SessionLocal()
+            _db = get_session()
             for m in _db.query(JobMetadata).filter(JobMetadata.analysis_song_info.isnot(None)).all():
                 match = _re.search(r"\((\d{4})\)", m.analysis_song_info or "")
                 if match:
@@ -1376,98 +784,25 @@ def _run_migrations() -> None:
 
 @app.on_event("startup")
 def _recover_jobs() -> None:
-    global _job
-    # Load historical timing data and queue
-    _load_stats()
+    """On startup: load queue, reset stale jobs, start worker health monitor."""
     _load_queue()
-    if not JOBS_DIR.exists():
-        return
 
-    # Build set of IDs already in the queue
-    queue_ids = {item["id"] for item in _queue}
-
-    # Scan all job directories for failed or interrupted jobs
-    for d in JOBS_DIR.iterdir():
-        if not d.is_dir():
-            continue
-        job_json = d / "job.json"
-        if not job_json.exists():
-            continue
-        try:
-            data = json.loads(job_json.read_text())
-        except (json.JSONDecodeError, OSError):
-            continue
-
-        job_id = data.get("id", d.name)
-
-        # If it was running when server died, mark as failed
-        if data.get("status") == "running":
-            data["status"] = "failed"
-            data["error"] = "Server restarted during processing"
-            data["finished_at"] = _now_iso()
-            job_json.write_text(json.dumps(data, default=str))
-
-        # Skip jobs that were explicitly removed by user
-        if data.get("status") == "removed":
-            continue
-
-        # Add any failed job to the queue so it retries automatically
-        if data.get("status") == "failed" and job_id not in queue_ids:
-            _queue.append({
-                "id": job_id,
-                "url": data.get("url", ""),
-                "mode": data.get("mode", "karaoke"),
-                "languages": data.get("languages", []),
-                "title": data.get("title", "Unknown"),
-                "thumbnail": data.get("thumbnail"),
-                "channel": data.get("channel"),
-                "upload_date": data.get("upload_date"),
-                "categories": data.get("categories", []),
-                "tags": data.get("tags", []),
-                "status": "queued",
-                "added_by": data.get("added_by"),
-                "was_failed": True,
-            })
-            queue_ids.add(job_id)
-
-    # Set the most recent job as current (for status display)
-    job_dirs = sorted(JOBS_DIR.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
-    for d in job_dirs:
-        job_json = d / "job.json"
-        if not job_json.exists():
-            continue
-        try:
-            data = json.loads(job_json.read_text())
-        except (json.JSONDecodeError, OSError):
-            continue
-        _job = data
-        break
-
-    # Reset any non-queued items back to "queued" (server restarted mid-job)
+    # Reset processing items back to queued (server restarted, workers may have changed)
+    changed = False
     for item in _queue:
-        if item.get("status") in ("processing", "failed"):
+        if item.get("status") in ("processing",):
             item["status"] = "queued"
-            item["was_failed"] = True
-    _save_queue()
+            item.pop("worker_id", None)
+            changed = True
+    if changed:
+        _save_queue()
 
-    # Auto-start queued items
-    _process_next_in_queue()
+    # Start worker health monitoring thread
+    health_thread = threading.Thread(target=_worker_health_loop, daemon=True)
+    health_thread.start()
 
-    # Clean up work directories for all completed jobs
-    for d in JOBS_DIR.iterdir():
-        if not d.is_dir():
-            continue
-        work_dir = d / "work"
-        if not work_dir.exists():
-            continue
-        job_json = d / "job.json"
-        if job_json.exists():
-            try:
-                data = json.loads(job_json.read_text())
-                if data.get("status") == "done":
-                    _cleanup_work_dir(work_dir)
-            except (json.JSONDecodeError, OSError):
-                pass
+    # Try dispatching queued jobs to any available workers
+    _dispatch_next_jobs()
 
 
 # ---------------------------------------------------------------------------
@@ -1570,7 +905,6 @@ def google_login(invite: str | None = None):
 def google_callback(code: str, state: str = "", db: Session = Depends(get_db)):
     """Handle Google OAuth callback."""
     import os
-    import httpx
     from urllib.parse import unquote
     client_id = os.getenv("GOOGLE_CLIENT_ID", "")
     client_secret = os.getenv("GOOGLE_CLIENT_SECRET", "")
@@ -1718,91 +1052,60 @@ def _slugify(text: str, max_len: int = 60) -> str:
 
 @app.post("/api/jobs")
 def create_job(req: JobRequest, user: User | None = Depends(get_optional_user)):
-    global _job
-    with _lock:
-        if _job is not None and _job["status"] == "running":
-            raise HTTPException(409, "A job is already running")
-
+    """Add a job to the front of the queue and dispatch immediately."""
     settings = _load_settings()
     allowed = settings.get("allowed_modes", list(VALID_MODES))
     mode = req.mode if req.mode in VALID_MODES else "karaoke"
     if mode not in allowed:
         raise HTTPException(403, f"Production mode '{mode}' is not enabled")
 
-    # Fetch metadata first so we can use the title as folder name
     meta = {}
     try:
         meta = fetch_metadata(req.url)
     except Exception:
         pass
     title = meta.get("title", "Unknown")
-    thumbnail = meta.get("thumbnail")
 
     slug = _slugify(title)
     job_id = f"{slug}-{secrets.token_hex(2)}"
-    output_dir = JOBS_DIR / job_id
-    output_dir.mkdir(parents=True, exist_ok=True)
-    # Support both old single language and new multi-language
-    _max_langs = _load_settings().get("max_subtitle_languages", 3)
-    languages = req.languages[:_max_langs] if req.languages else (
+    max_langs = settings.get("max_subtitle_languages", 3)
+    languages = req.languages[:max_langs] if req.languages else (
         [req.language] if req.language else []
     )
     if mode not in ("subtitled", "both"):
         languages = []
 
-    _job = {
+    item = {
         "id": job_id,
         "url": req.url,
         "mode": mode,
         "languages": languages,
         "title": title,
-        "thumbnail": thumbnail,
+        "thumbnail": meta.get("thumbnail"),
         "channel": meta.get("channel"),
         "upload_date": meta.get("upload_date"),
         "categories": meta.get("categories", []),
         "tags": meta.get("tags", []),
         "added_by": user.name.split()[0] if user and user.name else None,
         "added_by_id": str(user.id) if user else None,
-        "status": "running",
-        "step": 0,
-        "step_name": "Starting",
-        "step_progress": 0.0,
-        "started_at": _now_iso(),
-        "step_started_at": _now_iso(),
-        "finished_at": None,
-        "audio_duration": None,
-        "estimated_total": None,
-        "step_estimates": None,
-        "error": None,
-        "artifacts": {},
-        "output_dir": str(output_dir),
+        "status": "queued",
     }
-    _save_job_json()
-
-    if mode == "subtitled":
-        thread = threading.Thread(
-            target=_run_subtitled_pipeline,
-            args=(job_id, req.url, output_dir, languages),
-            daemon=True)
-    elif mode == "both":
-        thread = threading.Thread(
-            target=_run_combined_pipeline,
-            args=(job_id, req.url, output_dir, languages),
-            daemon=True)
-    else:
-        thread = threading.Thread(
-            target=_run_pipeline,
-            args=(job_id, req.url, output_dir),
-            daemon=True)
-    thread.start()
-
-    return {"job": _job}
+    with _lock:
+        _queue.insert(0, item)  # add to front
+    _save_queue()
+    _dispatch_next_jobs()
+    return {"job": item}
 
 
 @app.get("/api/jobs/current")
 def get_current_job():
+    """Return the most recently active job (for backward compat)."""
     with _lock:
-        return {"job": dict(_job) if _job else None}
+        if _active_jobs:
+            # Return the first active job
+            job = next(iter(_active_jobs.values()))
+            return {"job": dict(job)}
+        return {"job": None}
 
 
 # ---------------------------------------------------------------------------
@@ -1838,32 +1141,19 @@ def add_to_queue(req: QueueRequest, user: User | None = Depends(get_optional_use
             user_queued = sum(1 for q in _queue if q.get("added_by_id") == str(user.id))
         if user_queued >= p.max_queue_length:
             raise HTTPException(429, f"Queue limit reached ({p.max_queue_length})")
-        # Daily production limits
+        # Daily production limits (query DB instead of local disk)
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        user_today_karaoke = 0
-        user_today_subtitled = 0
-        for d in JOBS_DIR.iterdir():
-            if not d.is_dir():
-                continue
-            jf = d / "job.json"
-            if not jf.exists():
-                continue
-            try:
-                jdata = json.loads(jf.read_text())
-                if jdata.get("added_by_id") != str(user.id):
-                    continue
-                if jdata.get("status") != "done":
-                    continue
-                finished = jdata.get("finished_at", "")
-                if not finished.startswith(today_str):
-                    continue
-                jmode = jdata.get("mode", "karaoke")
-                if jmode == "karaoke":
-                    user_today_karaoke += 1
-                elif jmode in ("subtitled", "both"):
-                    user_today_subtitled += 1
-            except (json.JSONDecodeError, OSError):
-                continue
+        _db = get_session()
+        try:
+            today_jobs = _db.query(JobMetadata).filter(
+                JobMetadata.added_by_id == str(user.id),
+                JobMetadata.status == "done",
+                JobMetadata.finished_at >= today_str,
+            ).all()
+            user_today_karaoke = sum(1 for j in today_jobs if (j.mode or "karaoke") == "karaoke")
+            user_today_subtitled = sum(1 for j in today_jobs if (j.mode or "karaoke") in ("subtitled", "both"))
+        finally:
+            _db.close()
         if mode == "karaoke" and user_today_karaoke >= p.max_karaoke_per_day:
             raise HTTPException(429, f"Daily karaoke limit reached ({p.max_karaoke_per_day})")
         if mode in ("subtitled", "both") and user_today_subtitled >= p.max_subtitled_per_day:
@@ -1902,7 +1192,7 @@ def add_to_queue(req: QueueRequest, user: User | None = Depends(get_optional_use
     _log_activity(db, user, "queue", {"title": title, "url": req.url, "mode": mode})
 
     # Auto-start if nothing is running
-    _process_next_in_queue()
+    _dispatch_next_jobs()
 
     return {"item": item, "queue": _queue}
 
@@ -1914,73 +1204,55 @@ def get_queue():
         queue_with_progress = []
         for item in _queue:
             entry = dict(item)
-            # If this item is currently processing, merge job progress
-            if _job and _job.get("id") == item.get("id") and _job.get("status") == "running":
-                entry["step"] = _job.get("step", 0)
-                entry["step_name"] = _job.get("step_name", "")
-                entry["step_progress"] = _job.get("step_progress", 0)
+            job_id = item.get("id")
+            # If this item is being processed by a worker, merge progress
+            if job_id in _active_jobs:
+                active = _active_jobs[job_id]
+                entry["step"] = active.get("step", 0)
+                entry["step_name"] = active.get("step_name", "")
+                entry["step_progress"] = active.get("step_progress", 0)
                 entry["status"] = "processing"
-                entry["pause_requested"] = _pause_requested
+                entry["worker_name"] = active.get("worker_name", "")
             queue_with_progress.append(entry)
+
+        # Return first active job for backward compat
+        first_active = next(iter(_active_jobs.values()), None) if _active_jobs else None
         return {
             "queue": queue_with_progress,
-            "job": dict(_job) if _job else None,
-            "disk_quota_exceeded": _disk_quota_exceeded,
+            "job": dict(first_active) if first_active else None,
+            "workers_online": sum(1 for s in _worker_states.values() if s.get("online")),
         }
 
 
 @app.delete("/api/queue/{item_id}")
 def remove_from_queue(item_id: str):
-    """Remove an item from the queue. If processing, request cancellation.
-    For failed jobs, also cleans up intermediate files on disk."""
-    global _cancel_requested, _job
+    """Remove an item from the queue. If processing on a worker, send cancel."""
     with _lock:
         item = next((i for i in _queue if i["id"] == item_id), None)
         if not item:
             raise HTTPException(404, "Item not found in queue")
+        is_processing = item.get("status") == "processing"
+        worker_id = item.get("worker_id")
 
-        is_processing = (_job and _job.get("id") == item_id and _job.get("status") == "running")
+    # If being processed by a worker, send cancel request
+    if is_processing and worker_id:
+        workers = _load_workers()
+        worker = next((w for w in workers if w["id"] == worker_id), None)
+        if worker:
+            try:
+                headers = {}
+                if worker.get("api_key"):
+                    headers["Authorization"] = f"Bearer {worker['api_key']}"
+                httpx.post(f"{worker['url']}/worker/jobs/{item_id}/cancel",
+                           headers=headers, timeout=5)
+            except Exception:
+                pass
 
-    if is_processing:
-        # Signal the pipeline thread to cancel between steps
-        _cancel_requested = True
-        # Don't remove from queue here — _check_pause will handle cleanup
-        return {"deleted": True, "cancelling": True, "queue": _queue}
-
-    # Not processing — remove from queue and clean up files if failed
+    # Remove from queue and active jobs
     with _lock:
         _queue[:] = [i for i in _queue if i["id"] != item_id]
+        _active_jobs.pop(item_id, None)
     _save_queue()
-
-    # Clean up job directory for failed/incomplete jobs
-    job_dir = JOBS_DIR / item_id
-    if job_dir.exists():
-        job_json = job_dir / "job.json"
-        if job_json.exists():
-            try:
-                data = json.loads(job_json.read_text())
-            except (json.JSONDecodeError, OSError):
-                data = {}
-            # Only clean up if not a completed job (those live in the library)
-            if data.get("status") != "done":
-                shutil.rmtree(job_dir, ignore_errors=True)
-                # If directory couldn't be deleted, mark as removed so recovery skips it
-                if job_dir.exists() and job_json.exists():
-                    data["status"] = "removed"
-                    job_json.write_text(json.dumps(data, default=str))
-                # Clear current job reference if it was the deleted one
-                with _lock:
-                    if _job is not None and _job.get("id") == item_id:
-                        _job = None
-
-    # Clean up any DB metadata
-    try:
-        _db = SessionLocal()
-        _db.query(JobMetadata).filter(JobMetadata.job_id == item_id).delete()
-        _db.commit()
-        _db.close()
-    except Exception:
-        pass
 
     return {"deleted": True, "queue": _queue}
 
@@ -1997,7 +1269,7 @@ def convert_queue_to_wishlist(item_id: str, user: User = Depends(get_current_use
         if item.get("added_by_id") != str(user.id) and not is_admin(user):
             raise HTTPException(403, "You can only move your own queue items to requests")
         # Don't allow converting a processing item
-        if _job and _job.get("id") == item_id and _job.get("status") == "running":
+        if item.get("status") == "processing":
             raise HTTPException(409, "Cannot move a processing item")
         _queue[:] = [i for i in _queue if i["id"] != item_id]
     _save_queue()
@@ -2012,18 +1284,6 @@ def convert_queue_to_wishlist(item_id: str, user: User = Depends(get_current_use
     )
     db.add(wish)
     db.commit()
-
-    # Clean up job directory if it exists
-    job_dir = JOBS_DIR / item_id
-    if job_dir.exists():
-        job_json = job_dir / "job.json"
-        if job_json.exists():
-            try:
-                data = json.loads(job_json.read_text())
-                if data.get("status") != "done":
-                    shutil.rmtree(job_dir, ignore_errors=True)
-            except (json.JSONDecodeError, OSError):
-                pass
 
     return {"moved": True, "queue": _queue}
 
@@ -2052,149 +1312,71 @@ def reorder_queue(req: ReorderRequest):
 @app.post("/api/queue/start")
 def start_queue():
     """Manually trigger processing of the next queued item."""
-    _process_next_in_queue()
+    _dispatch_next_jobs()
     return {"started": True, "queue": _queue}
 
 
 @app.post("/api/queue/{item_id}/pause")
 def pause_queue_item(item_id: str):
-    """Toggle pause request for the currently processing item."""
-    global _pause_requested
+    """Cancel a processing item and re-queue it (pause is not supported with external workers)."""
     with _lock:
-        if not _job or _job.get("id") != item_id or _job.get("status") != "running":
+        item = next((i for i in _queue if i["id"] == item_id), None)
+        if not item or item.get("status") != "processing":
             raise HTTPException(400, "Item is not currently processing")
-    # Toggle: if already requesting pause, cancel it
-    _pause_requested = not _pause_requested
-    return {"pause_requested": _pause_requested}
+        worker_id = item.get("worker_id")
+
+    # Send cancel to worker, then re-queue
+    if worker_id:
+        workers = _load_workers()
+        worker = next((w for w in workers if w["id"] == worker_id), None)
+        if worker:
+            try:
+                headers = {}
+                if worker.get("api_key"):
+                    headers["Authorization"] = f"Bearer {worker['api_key']}"
+                httpx.post(f"{worker['url']}/worker/jobs/{item_id}/cancel",
+                           headers=headers, timeout=5)
+            except Exception:
+                pass
+
+    with _lock:
+        item["status"] = "queued"
+        item.pop("worker_id", None)
+        _active_jobs.pop(item_id, None)
+    _save_queue()
+    return {"paused": True}
 
 
 @app.post("/api/queue/{item_id}/resume")
 def resume_queue_item(item_id: str):
-    """Resume a paused or failed queue item."""
-    global _pause_requested, _job
+    """Resume a failed queue item by re-queuing it."""
     with _lock:
         item = next((i for i in _queue if i["id"] == item_id), None)
         if not item:
             raise HTTPException(404, "Item not found")
-        if _job is not None and _job.get("status") == "running":
-            raise HTTPException(409, "A job is already running")
-    _pause_requested = False
-
-    # Find the job data and resume it
-    output_dir = JOBS_DIR / item_id
-    job_json = output_dir / "job.json"
-    if not job_json.exists():
-        # Never started — just re-queue and process
-        with _lock:
-            item["status"] = "queued"
-        _save_queue()
-        _process_next_in_queue()
-        return {"resumed": True}
-
-    data = json.loads(job_json.read_text())
-    resume_step = _detect_resume_step(output_dir)
-    mode = data.get("mode", "karaoke")
-    languages = data.get("languages", [])
-
-    with _lock:
-        item["status"] = "processing"
+        item["status"] = "queued"
+        item.pop("worker_id", None)
+        item.pop("error", None)
     _save_queue()
-
-    _job = {
-        "id": item_id,
-        "url": data.get("url", ""),
-        "mode": mode,
-        "languages": languages,
-        "title": data.get("title", "Unknown"),
-        "thumbnail": data.get("thumbnail"),
-        "channel": data.get("channel"),
-        "status": "running",
-        "step": 0,
-        "step_name": f"Resuming from step {resume_step}",
-        "step_progress": 0.0,
-        "started_at": _now_iso(),
-        "step_started_at": _now_iso(),
-        "finished_at": None,
-        "audio_duration": data.get("audio_duration"),
-        "estimated_total": None,
-        "step_estimates": None,
-        "error": None,
-        "artifacts": data.get("artifacts", {}),
-        "output_dir": str(output_dir),
-    }
-    _save_job_json()
-
-    if mode == "subtitled":
-        thread = threading.Thread(
-            target=_run_subtitled_pipeline,
-            args=(item_id, data.get("url", ""), output_dir, languages),
-            daemon=True)
-    else:
-        thread = threading.Thread(
-            target=_run_pipeline,
-            args=(item_id, data.get("url", ""), output_dir),
-            kwargs={"resume_from": resume_step},
-            daemon=True)
-    thread.start()
-
+    _dispatch_next_jobs()
     return {"resumed": True}
 
 
 @app.post("/api/jobs/{job_id}/resume")
 def resume_job(job_id: str):
-    global _job
+    """Re-queue a job for processing."""
+    # Find in queue or re-add
     with _lock:
-        if _job is not None and _job["status"] == "running":
-            raise HTTPException(409, "A job is already running")
-
-    output_dir = JOBS_DIR / job_id
-    job_json = output_dir / "job.json"
-    if not job_json.exists():
-        raise HTTPException(404, "Job not found")
-
-    try:
-        data = json.loads(job_json.read_text())
-    except (json.JSONDecodeError, OSError):
-        raise HTTPException(500, "Could not read job data")
-
-    if data.get("status") == "done":
-        raise HTTPException(400, "Job already completed")
-
-    resume_step = _detect_resume_step(output_dir)
-    if resume_step > 5:
-        # All pipeline steps done — just re-run post-processing
-        resume_step = 5
-
-    _job = {
-        "id": job_id,
-        "url": data.get("url", ""),
-        "title": data.get("title", "Unknown"),
-        "thumbnail": data.get("thumbnail"),
-        "status": "running",
-        "step": 0,
-        "step_name": f"Resuming from step {resume_step}",
-        "step_progress": 0.0,
-        "started_at": _now_iso(),
-        "step_started_at": _now_iso(),
-        "finished_at": None,
-        "audio_duration": data.get("audio_duration"),
-        "estimated_total": None,
-        "step_estimates": None,
-        "error": None,
-        "artifacts": data.get("artifacts", {}),
-        "output_dir": str(output_dir),
-    }
-    _save_job_json()
-
-    thread = threading.Thread(
-        target=_run_pipeline,
-        args=(job_id, data.get("url", ""), output_dir),
-        kwargs={"resume_from": resume_step},
-        daemon=True,
-    )
-    thread.start()
-
-    return {"job": _job, "resume_from": resume_step}
+        item = next((i for i in _queue if i["id"] == job_id), None)
+        if item:
+            item["status"] = "queued"
+            item.pop("worker_id", None)
+            item.pop("error", None)
+        else:
+            raise HTTPException(404, "Job not found in queue")
+    _save_queue()
+    _dispatch_next_jobs()
+    return {"resumed": True}
 
 
 @app.get("/api/library")
@@ -2561,34 +1743,20 @@ def update_job_metadata(job_id: str, req: UpdateJobRequest,
         meta.year = req.year
     db.commit()
 
-    # Also update local job.json if it exists (pipeline reads it)
-    job_json = JOBS_DIR / job_id / "job.json"
-    if job_json.exists():
-        try:
-            data = json.loads(job_json.read_text())
-            if req.title is not None:
-                data["title"] = req.title
-            if req.artist is not None:
-                data["artist"] = req.artist
-            job_json.write_text(json.dumps(data, default=str))
-        except (json.JSONDecodeError, OSError):
-            pass
-
-    # Update in-memory job if currently active
+    # Update in-memory active job if currently processing
     with _lock:
-        if _job is not None and _job.get("id") == job_id:
+        if job_id in _active_jobs:
             if req.title is not None:
-                _job["title"] = req.title
+                _active_jobs[job_id]["title"] = req.title
             if req.artist is not None:
-                _job["artist"] = req.artist
+                _active_jobs[job_id]["artist"] = req.artist
 
     return {"title": meta.title, "artist": meta.artist, "year": meta.year}
 
 
 @app.delete("/api/jobs/{job_id}")
 def delete_job(job_id: str, user: User = Depends(get_current_user)):
-    """Delete a job and all its files from disk."""
-    global _job
+    """Delete a job and all its files."""
 
     # Enforce delete permission (admins bypass)
     if not is_admin(user) and user.permissions and not user.permissions.can_delete_library:
@@ -2597,15 +1765,15 @@ def delete_job(job_id: str, user: User = Depends(get_current_user)):
     # Check job exists locally or in DB
     job_dir = JOBS_DIR / job_id
     has_local = job_dir.exists() and job_dir.is_dir()
-    _db = SessionLocal()
+    _db = get_session()
     has_db = _db.query(JobMetadata).filter(JobMetadata.job_id == job_id).first() is not None
     if not has_local and not has_db:
         _db.close()
         raise HTTPException(404, "Job not found")
 
-    # Don't allow deleting a running job
+    # Don't allow deleting a processing job
     with _lock:
-        if _job is not None and _job.get("id") == job_id and _job.get("status") == "running":
+        if job_id in _active_jobs:
             _db.close()
             raise HTTPException(409, "Cannot delete a running job")
 
@@ -2616,11 +1784,6 @@ def delete_job(job_id: str, user: User = Depends(get_current_user)):
     # Delete from R2
     if storage.is_r2():
         storage.delete_prefix(f"jobs/{job_id}/")
-
-    # Clear current job reference if it was the deleted one
-    with _lock:
-        if _job is not None and _job.get("id") == job_id:
-            _job = None
 
     # Clean up DB metadata (votes, comments, job metadata)
     try:
@@ -2921,7 +2084,7 @@ def admin_stats(admin: User = Depends(require_admin), db: Session = Depends(get_
     # Queue status
     with _lock:
         queue_len = len(_queue)
-        running = _job is not None and _job.get("status") == "running"
+        running = len(_active_jobs) > 0
 
     return {
         "users": user_count,

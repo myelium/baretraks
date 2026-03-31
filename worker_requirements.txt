@@ -1,0 +1,15 @@
+yt-dlp
+torch==2.5.1
+torchaudio==2.5.1
+soundfile
+demucs
+faster-whisper
+whisperx
+ffmpeg-python
+imageio-ffmpeg
+anthropic
+httpx
+boto3
+fastapi
+uvicorn[standard]
+python-dotenv

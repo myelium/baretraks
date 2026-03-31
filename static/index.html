@@ -2444,6 +2444,7 @@
       <button class="admin-tab" data-tab="invitations" onclick="switchAdminTab('invitations')">Invitations</button>
       <button class="admin-tab" data-tab="prompts" onclick="switchAdminTab('prompts')">Prompts</button>
       <button class="admin-tab" data-tab="wishlist" onclick="switchAdminTab('wishlist')">Requests</button>
+      <button class="admin-tab" data-tab="workers" onclick="switchAdminTab('workers')">Workers</button>
       <button class="admin-tab" data-tab="settings" onclick="switchAdminTab('settings')">Settings</button>
     </div>
 
@@ -2455,6 +2456,7 @@
     <div id="admin-tab-invitations" class="admin-tab-content" style="display:none;"></div>
     <div id="admin-tab-prompts" class="admin-tab-content" style="display:none;"></div>
     <div id="admin-tab-wishlist" class="admin-tab-content" style="display:none;"></div>
+    <div id="admin-tab-workers" class="admin-tab-content" style="display:none;"></div>
     <div id="admin-tab-settings" class="admin-tab-content" style="display:none;"></div>
   </div>
 </div>
@@ -2773,7 +2775,7 @@ async function pollQueue() {
     const oldLen = productionQueue.length;
     productionQueue = data.queue || [];
     currentJob = data.job || null;
-    _diskQuotaExceeded = data.disk_quota_exceeded || false;
+    _diskQuotaExceeded = false;
     renderQueue();
 
     // If a processing item just finished or queue shrunk, refresh library
@@ -2813,7 +2815,7 @@ async function backgroundPoll() {
       const hadItems = productionQueue.length > 0;
       productionQueue = qData.queue || [];
       currentJob = qData.job || null;
-      _diskQuotaExceeded = qData.disk_quota_exceeded || false;
+      _diskQuotaExceeded = false;
       renderQueue();
       // Start fast polling if new items appeared
       if (!hadItems && productionQueue.length > 0) startQueuePolling();
@@ -4396,12 +4398,17 @@ async function loadLibrary() {
 function renderLibraryFilterBar() {
   const bar = document.getElementById('library-filter-bar');
 
-  // Collect type facets
+  // Collect type facets — 'both' counts under both Karaoke and Subtitled
   const typeCounts = {};
   for (const item of libraryItems) {
     const m = item.mode || 'karaoke';
-    const type = m === 'subtitled' ? 'Subtitled' : 'Karaoke';
-    typeCounts[type] = (typeCounts[type] || 0) + 1;
+    if (m === 'both') {
+      typeCounts['Karaoke'] = (typeCounts['Karaoke'] || 0) + 1;
+      typeCounts['Subtitled'] = (typeCounts['Subtitled'] || 0) + 1;
+    } else {
+      const type = m === 'subtitled' ? 'Subtitled' : 'Karaoke';
+      typeCounts[type] = (typeCounts[type] || 0) + 1;
+    }
   }
 
   const types = Object.keys(typeCounts).sort();
@@ -4490,11 +4497,15 @@ function renderLibraryGrid() {
       const cats = item.categories || [];
       if (!cats.some(c => libraryFilters.categories.has(c))) return false;
     }
-    // Type filter
+    // Type filter — 'both' matches either Karaoke or Subtitled
     if (libraryFilters.types.size > 0) {
       const m = item.mode || 'karaoke';
-      const type = m === 'subtitled' ? 'Subtitled' : 'Karaoke';
-      if (!libraryFilters.types.has(type)) return false;
+      if (m === 'both') {
+        if (!libraryFilters.types.has('Karaoke') && !libraryFilters.types.has('Subtitled')) return false;
+      } else {
+        const type = m === 'subtitled' ? 'Subtitled' : 'Karaoke';
+        if (!libraryFilters.types.has(type)) return false;
+      }
     }
     return true;
   });
@@ -4538,11 +4549,7 @@ function renderLibraryGrid() {
       : `<div class="library-thumb" style="display:flex;align-items:center;justify-content:center;color:#4a3f2f;font-size:2rem;">&#9835;</div>`;
     const mode = item.mode || 'karaoke';
     const badgeClass = mode === 'both' ? 'both' : (mode === 'subtitled' ? 'subtitled' : 'karaoke');
-    let badgeText = mode === 'both' ? 'Karaoke + Subtitles' : (mode === 'subtitled' ? 'Subtitled' : 'Karaoke');
-    const langs = item.languages || (item.language ? [item.language] : []);
-    if ((mode === 'subtitled' || mode === 'both') && langs.length > 0) {
-      badgeText += ' \u00b7 ' + langs.map(c => (LANG_NAMES_ALL[c] || c)).join(', ');
-    }
+    const badgeText = mode === 'both' ? '<span style="color:#d4a84b">Karaoke</span> + Subtitles' : (mode === 'subtitled' ? 'Subtitled' : 'Karaoke');
     return `
       <div class="library-item" onclick="showPlayerForJob('${item.id}')">
         <div class="library-item-header">
@@ -5062,6 +5069,7 @@ function switchAdminTab(tab) {
   else if (tab === 'invitations') loadAdminInvitations();
   else if (tab === 'prompts') loadAdminPrompts();
   else if (tab === 'wishlist') loadAdminWishlist();
+  else if (tab === 'workers') loadAdminWorkers();
   else if (tab === 'settings') loadAdminSettings();
 }
 
@@ -5609,6 +5617,110 @@ async function adminDeleteWishlist(itemId) {
     await fetch(`/api/admin/wishlist/${itemId}`, { method: 'DELETE' });
     loadAdminWishlist();
   } catch (e) { showAlert('Error: ' + e.message); }
+}
+
+async function loadAdminWorkers() {
+  const container = document.getElementById('admin-tab-workers');
+  container.innerHTML = '<p style="color:var(--text-dim);padding:12px;">Loading...</p>';
+  try {
+    const resp = await fetch('/api/admin/workers');
+    const data = await resp.json();
+    const workers = data.workers || [];
+
+    container.innerHTML = `<div class="admin-section">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <label style="color:var(--text-bright);font-size:0.85rem;font-weight:600;">Production Workers</label>
+        <button class="admin-btn" onclick="showAddWorkerForm()">+ Add Worker</button>
+      </div>
+      <div id="add-worker-form" style="display:none;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+          <div><label style="font-size:0.7rem;color:var(--text-dim);">Name</label>
+            <input type="text" id="new-worker-name" placeholder="Mac Mini" style="width:100%;padding:4px 8px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:0.8rem;box-sizing:border-box;" /></div>
+          <div><label style="font-size:0.7rem;color:var(--text-dim);">URL</label>
+            <input type="text" id="new-worker-url" placeholder="http://localhost:8001" style="width:100%;padding:4px 8px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:0.8rem;box-sizing:border-box;" /></div>
+        </div>
+        <div style="margin-bottom:8px;"><label style="font-size:0.7rem;color:var(--text-dim);">API Key</label>
+          <input type="text" id="new-worker-key" placeholder="optional shared secret" style="width:100%;padding:4px 8px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:0.8rem;box-sizing:border-box;" /></div>
+        <div style="display:flex;gap:6px;">
+          <button class="admin-btn" onclick="addWorker()">Add</button>
+          <button class="admin-btn" onclick="document.getElementById('add-worker-form').style.display='none'">Cancel</button>
+        </div>
+      </div>
+      ${workers.length === 0 ? '<p style="color:var(--text-dim);font-size:0.8rem;padding:8px 0;">No workers configured. Add a worker to start processing queue items.</p>' : ''}
+      ${workers.map(w => {
+        const statusColor = w.online && w.status === 'idle' ? 'var(--success)' : w.online && w.status === 'busy' ? '#d4a020' : 'var(--error)';
+        const statusIcon = w.online ? (w.status === 'idle' ? '●' : '◉') : '○';
+        const statusText = w.online ? w.status : 'offline';
+        const jobInfo = w.current_job ? ` — ${w.current_job.step_name || 'processing'}` : '';
+        return `<div class="admin-row" style="flex-wrap:wrap;gap:6px;">
+          <div style="flex:1;min-width:0;">
+            <span style="color:${statusColor};margin-right:4px;">${statusIcon}</span>
+            <span class="name">${escapeHtml(w.name)}</span>
+            <span class="meta" style="margin-left:6px;">${escapeHtml(w.url)}</span>
+            <span class="meta" style="margin-left:6px;">${w.device || ''}</span>
+            <span style="font-size:0.7rem;color:${statusColor};margin-left:6px;">${statusText}${jobInfo}</span>
+            ${w.last_seen ? `<span class="meta" style="margin-left:6px;">seen ${new Date(w.last_seen).toLocaleTimeString()}</span>` : ''}
+          </div>
+          <div style="display:flex;gap:4px;align-items:center;">
+            <button onclick="testWorker('${w.id}')" style="padding:3px 8px;font-size:0.7rem;background:var(--bg-hover);color:var(--text);border:1px solid var(--border);border-radius:5px;cursor:pointer;">Test</button>
+            <button onclick="toggleWorker('${w.id}')" style="padding:3px 8px;font-size:0.7rem;background:var(--bg-hover);color:${w.enabled !== false ? 'var(--success)' : 'var(--error)'};border:1px solid var(--border);border-radius:5px;cursor:pointer;">${w.enabled !== false ? 'Enabled' : 'Disabled'}</button>
+            <button onclick="deleteWorker('${w.id}')" style="padding:3px 8px;font-size:0.7rem;background:var(--bg-hover);color:var(--error);border:1px solid var(--border);border-radius:5px;cursor:pointer;">Remove</button>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+  } catch (e) {
+    container.innerHTML = '<p style="color:var(--error);padding:12px;">Failed to load workers.</p>';
+  }
+}
+
+function showAddWorkerForm() {
+  document.getElementById('add-worker-form').style.display = '';
+  document.getElementById('new-worker-name').focus();
+}
+
+async function addWorker() {
+  const name = document.getElementById('new-worker-name').value.trim();
+  const url = document.getElementById('new-worker-url').value.trim();
+  const api_key = document.getElementById('new-worker-key').value.trim();
+  if (!name || !url) return showAlert('Name and URL are required');
+  const resp = await fetch('/api/admin/workers', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, url, api_key }),
+  });
+  if (resp.ok) {
+    const data = await resp.json();
+    // Auto-test to populate status
+    if (data.worker && data.worker.id) {
+      await fetch(`/api/admin/workers/${data.worker.id}/test`, { method: 'POST' });
+    }
+    loadAdminWorkers();
+  } else {
+    showAlert('Failed to add worker');
+  }
+}
+
+async function testWorker(workerId) {
+  const resp = await fetch(`/api/admin/workers/${workerId}/test`, { method: 'POST' });
+  const data = await resp.json();
+  if (data.success) {
+    showAlert(`Connected: ${data.status.name} (${data.status.device}, ${data.status.status})`);
+    loadAdminWorkers();  // refresh to show updated status
+  } else {
+    showAlert(`Failed: ${data.error}`);
+  }
+}
+
+async function toggleWorker(workerId) {
+  await fetch(`/api/admin/workers/${workerId}/toggle`, { method: 'POST' });
+  loadAdminWorkers();
+}
+
+async function deleteWorker(workerId) {
+  if (!await showConfirm('Remove this worker?')) return;
+  await fetch(`/api/admin/workers/${workerId}`, { method: 'DELETE' });
+  loadAdminWorkers();
 }
 
 async function loadAdminSettings() {
@@ -6570,7 +6682,7 @@ async function init() {
     const data = await resp.json();
     productionQueue = data.queue || [];
     currentJob = data.job || null;
-    _diskQuotaExceeded = data.disk_quota_exceeded || false;
+    _diskQuotaExceeded = false;
     renderQueue();
     if (productionQueue.length > 0) startQueuePolling();
   } catch (e) {}
