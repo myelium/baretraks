@@ -56,6 +56,7 @@ def compose(
         "-c:a", "aac",
         "-b:a", "192k",
         "-shortest",
+        "-movflags", "+faststart",
         str(output_path),
     ]
 

@@ -1259,7 +1259,7 @@
     color: #d4c8b0;
     border: 1px solid rgba(74,63,47,0.5);
   }
-  .library-mode-badge.subtitled { color: #7eb8da; border-color: rgba(126,184,218,0.4); }
+  .library-mode-badge.subtitled { color: #a0d890; border-color: rgba(160,216,144,0.4); }
   .library-mode-badge.karaoke { color: #d4a84b; border-color: rgba(212,168,75,0.4); }
   .library-mode-badge.both { color: #a0d890; border-color: rgba(160,216,144,0.4); }
 
@@ -1619,8 +1619,8 @@
   }
   .player-overlay-actions {
     position: absolute;
-    top: 12px;
-    right: 16px;
+    top: 20px;
+    right: 24px;
     display: flex;
     align-items: center;
     gap: 4px;
@@ -2137,85 +2137,102 @@
 
   /* --- Admin Panel --- */
   .admin-tab {
-    padding: 8px 16px; background: none; border: none; border-bottom: 2px solid transparent;
-    color: var(--text-muted); font-size: 0.8rem; font-weight: 500; font-family: inherit;
-    cursor: pointer; transition: all 0.2s;
+    padding: 10px 20px; background: none; border: none; border-bottom: 2px solid transparent;
+    color: var(--text-muted); font-size: 0.9rem; font-weight: 500; font-family: inherit;
+    cursor: pointer; transition: all 0.2s; white-space: nowrap;
   }
   .admin-tab:hover { color: var(--text); }
   .admin-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-  .admin-tab-content { max-height: 450px; overflow-y: auto; }
+  .admin-tab-content { max-height: calc(80vh - 140px); overflow-y: auto; padding: 4px 0; }
   .admin-stats-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 14px;
-    margin-bottom: 20px;
-  }
-  .admin-stat-group {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    min-width: 60px;
-  }
-  .admin-stat-label {
-    font-size: 0.6rem;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 12px;
     margin-bottom: 4px;
-    font-weight: 500;
   }
-  .admin-stat {
-    padding: 6px 12px;
-    background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px;
-    text-align: center;
-    min-width: 50px;
+  .admin-stat-card {
+    background: var(--bg-input); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 16px; display: flex; flex-direction: column; gap: 4px;
   }
-  .admin-stat .val { font-size: 1rem; font-weight: 700; color: var(--text-bright); }
+  .admin-stat-card .val { font-size: 1.5rem; font-weight: 700; color: var(--text-bright); line-height: 1.2; }
+  .admin-stat-card .label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 500; }
+  .admin-stat-card.accent { border-color: rgba(180,140,60,0.3); }
+  .admin-stat-card.accent .val { color: var(--accent); }
+  .admin-sub-tabs {
+    display: flex; gap: 4px; margin-bottom: 14px; padding: 4px; background: var(--bg-input);
+    border-radius: 8px; border: 1px solid var(--border);
+  }
+  .admin-sub-tab {
+    padding: 6px 14px; border-radius: 6px; border: none;
+    background: none; color: var(--text-dim); font-size: 0.82rem; font-family: inherit;
+    cursor: pointer; transition: all 0.2s; font-weight: 500;
+  }
+  .admin-sub-tab:hover { color: var(--text); }
+  .admin-sub-tab.active { background: var(--bg-card); color: var(--text-bright); box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
   .admin-row {
-    display: flex; align-items: center; gap: 10px; padding: 10px 12px;
-    border-bottom: 1px solid var(--border-light); font-size: 0.82rem;
+    display: flex; align-items: center; gap: 12px; padding: 12px 16px;
+    border-bottom: 1px solid var(--border-light); font-size: 0.88rem;
   }
   .admin-row:last-child { border-bottom: none; }
   .admin-row .name { font-weight: 500; color: var(--text-bright); }
-  .admin-row .email { color: var(--text-dim); }
-  .admin-row .meta { font-size: 0.7rem; color: var(--text-muted); }
+  .admin-row .email { color: var(--text-dim); font-size: 0.82rem; }
+  .admin-row .meta { font-size: 0.78rem; color: var(--text-muted); }
   .admin-row .role-badge {
-    font-size: 0.65rem; font-weight: 600; text-transform: uppercase; padding: 2px 8px;
+    font-size: 0.72rem; font-weight: 600; text-transform: uppercase; padding: 3px 10px;
     border-radius: 4px; letter-spacing: 0.03em;
   }
   .admin-row .role-badge.admin { color: var(--accent); background: rgba(180,140,60,0.15); }
   .admin-row .role-badge.user { color: var(--text-muted); background: var(--bg-input); }
-  .admin-row-actions { display: flex; gap: 4px; margin-left: auto; flex-shrink: 0; }
+  .admin-row-actions { display: flex; gap: 6px; margin-left: auto; flex-shrink: 0; }
   .admin-btn {
-    padding: 3px 8px; border-radius: 6px; border: 1px solid var(--border);
-    background: var(--bg-input); color: var(--text-dim); font-size: 0.7rem;
+    padding: 5px 12px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--bg-input); color: var(--text-dim); font-size: 0.8rem;
     font-family: inherit; cursor: pointer; transition: all 0.2s; white-space: nowrap;
   }
   .admin-btn:hover { border-color: var(--accent); color: var(--accent); }
   .admin-btn.danger:hover { border-color: var(--error); color: var(--error); }
   .admin-role-select {
-    padding: 3px 6px; border-radius: 6px; border: 1px solid var(--border);
-    background: var(--bg-input); color: var(--text-dim); font-size: 0.7rem;
+    padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--bg-input); color: var(--text-dim); font-size: 0.8rem;
     font-family: inherit; cursor: pointer; transition: all 0.2s;
     -webkit-appearance: none; appearance: none;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 24 24' fill='none' stroke='%236b6050' stroke-width='3'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
-    background-repeat: no-repeat; background-position: right 6px center; padding-right: 20px;
+    background-repeat: no-repeat; background-position: right 6px center; padding-right: 22px;
   }
   .admin-role-select:hover { border-color: var(--accent); color: var(--accent); }
   .admin-section {
     background: var(--bg-input); border: 1px solid var(--border); border-radius: 10px;
     overflow: hidden;
   }
+  .admin-section-title {
+    font-size: 0.92rem; font-weight: 600; color: var(--text-bright); margin-bottom: 6px;
+  }
+  .admin-section-desc {
+    font-size: 0.78rem; color: var(--text-dim); margin: 0 0 14px 0;
+  }
   .admin-filter-row {
-    display: flex; gap: 6px; margin-bottom: 10px;
+    display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap;
   }
   .admin-filter-btn {
-    padding: 4px 12px; border-radius: 6px; border: 1px solid var(--border);
-    background: none; color: var(--text-dim); font-size: 0.72rem; font-family: inherit;
+    padding: 5px 14px; border-radius: 6px; border: 1px solid var(--border);
+    background: none; color: var(--text-dim); font-size: 0.8rem; font-family: inherit;
     cursor: pointer; transition: all 0.2s;
   }
   .admin-filter-btn:hover { border-color: var(--text-dim); }
   .admin-filter-btn.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .admin-worker-card {
+    padding: 14px 16px; border-bottom: 1px solid var(--border-light);
+  }
+  .admin-worker-card:last-child { border-bottom: none; }
+  .admin-worker-header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .admin-worker-status {
+    width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+  }
+  .admin-worker-status.online { background: var(--success); box-shadow: 0 0 6px rgba(122,138,60,0.5); }
+  .admin-worker-status.busy { background: #d4a020; box-shadow: 0 0 6px rgba(212,160,32,0.5); }
+  .admin-worker-status.offline { background: var(--error); opacity: 0.6; }
+  .admin-worker-meta { display: flex; gap: 16px; font-size: 0.78rem; color: var(--text-muted); flex-wrap: wrap; }
+  .admin-worker-actions { display: flex; gap: 6px; margin-left: auto; }
 
   /* --- Custom confirm dialog --- */
   .confirm-overlay {
@@ -2426,38 +2443,27 @@
 
 <!-- Admin Overlay -->
 <div id="admin-overlay" class="player-overlay hidden" onclick="if(event.target===this)closeAdmin()">
-  <div class="player-overlay-content" style="max-width:800px;position:relative;">
+  <div class="player-overlay-content" style="max-width:960px;width:95vw;position:relative;">
     <div class="player-overlay-actions">
       <button class="player-overlay-close" onclick="closeAdmin()">&times;</button>
     </div>
-    <h3 style="color:var(--text-bright);margin-bottom:16px;">Admin Panel</h3>
-
-    <!-- Stats Bar -->
-    <div id="admin-stats" class="admin-stats-row"></div>
+    <h3 style="color:var(--text-bright);margin-bottom:16px;font-size:1.2rem;">Admin Panel</h3>
 
     <!-- Tabs -->
     <div style="display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:0;">
-      <button class="admin-tab active" data-tab="users" onclick="switchAdminTab('users')">Users</button>
-      <button class="admin-tab" data-tab="activity" onclick="switchAdminTab('activity')">Activity</button>
+      <button class="admin-tab active" data-tab="overview" onclick="switchAdminTab('overview')">Overview</button>
+      <button class="admin-tab" data-tab="users" onclick="switchAdminTab('users')">Users</button>
+      <button class="admin-tab" data-tab="content" onclick="switchAdminTab('content')">Content</button>
       <button class="admin-tab" data-tab="feedback" onclick="switchAdminTab('feedback')">Feedback</button>
-      <button class="admin-tab" data-tab="comments" onclick="switchAdminTab('comments')">Comments</button>
-      <button class="admin-tab" data-tab="invitations" onclick="switchAdminTab('invitations')">Invitations</button>
-      <button class="admin-tab" data-tab="prompts" onclick="switchAdminTab('prompts')">Prompts</button>
-      <button class="admin-tab" data-tab="wishlist" onclick="switchAdminTab('wishlist')">Requests</button>
-      <button class="admin-tab" data-tab="workers" onclick="switchAdminTab('workers')">Workers</button>
-      <button class="admin-tab" data-tab="settings" onclick="switchAdminTab('settings')">Settings</button>
+      <button class="admin-tab" data-tab="system" onclick="switchAdminTab('system')">System</button>
     </div>
 
     <!-- Tab Content -->
-    <div id="admin-tab-users" class="admin-tab-content"></div>
-    <div id="admin-tab-activity" class="admin-tab-content" style="display:none;"></div>
+    <div id="admin-tab-overview" class="admin-tab-content"></div>
+    <div id="admin-tab-users" class="admin-tab-content" style="display:none;"></div>
+    <div id="admin-tab-content" class="admin-tab-content" style="display:none;"></div>
     <div id="admin-tab-feedback" class="admin-tab-content" style="display:none;"></div>
-    <div id="admin-tab-comments" class="admin-tab-content" style="display:none;"></div>
-    <div id="admin-tab-invitations" class="admin-tab-content" style="display:none;"></div>
-    <div id="admin-tab-prompts" class="admin-tab-content" style="display:none;"></div>
-    <div id="admin-tab-wishlist" class="admin-tab-content" style="display:none;"></div>
-    <div id="admin-tab-workers" class="admin-tab-content" style="display:none;"></div>
-    <div id="admin-tab-settings" class="admin-tab-content" style="display:none;"></div>
+    <div id="admin-tab-system" class="admin-tab-content" style="display:none;"></div>
   </div>
 </div>
 
@@ -2964,7 +2970,7 @@ function renderQueue() {
       const overallPct = totalSteps > 0 ? Math.round(((stepNum - 1 + stepProg) / totalSteps) * 100) : 0;
       const barPct = overallPct;
       const langSuffix = processingItem.languages?.length ? ' · ' + processingItem.languages.map(c => LANG_NAMES_ALL[c] || c).join(', ') : '';
-      const modeLabel = processingItem.mode === 'both' ? 'Karaoke + Subtitles' + langSuffix : (processingItem.mode === 'subtitled' ? 'Subtitled' + langSuffix : 'Karaoke');
+      const modeLabel = processingItem.mode === 'both' ? 'Karaoke + Subtitles' + langSuffix : (processingItem.mode === 'subtitled' ? 'Subtitles' + langSuffix : 'Karaoke');
       const statusLine = stepNum > 0 ? `${stepNum}/${totalSteps} ${processingItem.step_name}` : processingItem.step_name || modeLabel;
 
       const pieEl = existingEl.querySelector('.queue-pie');
@@ -2986,7 +2992,7 @@ function renderQueue() {
     const langSuffix = item.languages?.length ? ' · ' + item.languages.map(c => LANG_NAMES_ALL[c] || c).join(', ') : '';
     const modeLabel = item.mode === 'both'
       ? 'Karaoke + Subtitles' + langSuffix
-      : (item.mode === 'subtitled' ? 'Subtitled' + langSuffix : 'Karaoke');
+      : (item.mode === 'subtitled' ? 'Subtitles' + langSuffix : 'Karaoke');
 
     let statusLine = modeLabel;
     if (isProcessing && item.step_name) {
@@ -4158,18 +4164,13 @@ function destroyVocalsSync() {
   }
   vocalsOn = false;
   _currentVideoJobId = null;
-  if (activeMediaEl) {
-    activeMediaEl.removeEventListener('play', onMediaPlay);
-    activeMediaEl.removeEventListener('pause', onMediaPause);
-    activeMediaEl.removeEventListener('seeked', onMediaSeeked);
-  }
 }
 
 function _playVocals() {
   if (!vocalsAudioEl || !vocalsOn || !activeMediaEl) return;
+  vocalsAudioEl.volume = 1;
   vocalsAudioEl.currentTime = activeMediaEl.currentTime + VOCALS_OFFSET;
   vocalsAudioEl.play().then(() => {
-    // Guard: if video was paused while play() was resolving, re-pause vocals
     if (activeMediaEl && activeMediaEl.paused) vocalsAudioEl.pause();
   }).catch(() => {});
 }
@@ -4273,8 +4274,8 @@ function renderLyrics() {
   panel.appendChild(scrollInner);
 }
 
-const VOCALS_OFFSET = 0.42; // seconds — compensate for MP3 encoder padding (positive = vocals seek ahead)
-const VOCALS_DRIFT_THRESHOLD = 0.5; // only correct if drift exceeds 500ms
+const VOCALS_OFFSET = 0.0; // seconds — no offset needed when streaming from R2/CDN
+const VOCALS_DRIFT_THRESHOLD = 0.15; // correct if drift exceeds 150ms
 let _lastDriftCorrection = 0; // timestamp of last correction
 
 function updateLyricsHighlight(t) {
@@ -4340,10 +4341,10 @@ function _stopLyricsRaf() {
 }
 
 function onTimeUpdate() {
-  // Drift correction for vocal sync — only when severely out of sync, at most once per 5s
+  // Drift correction for vocal sync — check every 2s
   if (vocalsAudioEl && vocalsOn && !activeMediaEl.paused) {
     const now = performance.now();
-    if (now - _lastDriftCorrection > 5000) {
+    if (now - _lastDriftCorrection > 2000) {
       const expected = activeMediaEl.currentTime + VOCALS_OFFSET;
       const drift = vocalsAudioEl.currentTime - expected;
       if (Math.abs(drift) > VOCALS_DRIFT_THRESHOLD) {
@@ -4549,7 +4550,7 @@ function renderLibraryGrid() {
       : `<div class="library-thumb" style="display:flex;align-items:center;justify-content:center;color:#4a3f2f;font-size:2rem;">&#9835;</div>`;
     const mode = item.mode || 'karaoke';
     const badgeClass = mode === 'both' ? 'both' : (mode === 'subtitled' ? 'subtitled' : 'karaoke');
-    const badgeText = mode === 'both' ? '<span style="color:#d4a84b">Karaoke</span> + Subtitles' : (mode === 'subtitled' ? 'Subtitled' : 'Karaoke');
+    const badgeText = mode === 'both' ? '<span style="color:#d4a84b">Karaoke</span> + Subtitles' : (mode === 'subtitled' ? 'Subtitles' : 'Karaoke');
     return `
       <div class="library-item" onclick="showPlayerForJob('${item.id}')">
         <div class="library-item-header">
@@ -5046,12 +5047,14 @@ async function submitFeedback(e) {
 }
 
 let _adminFeedbackFilter = 'all';
+let _adminContentSubTab = 'comments';
+let _adminUsersSubTab = 'users';
+let _adminSystemSubTab = 'workers';
 
 async function openAdminPanel() {
   document.getElementById('admin-overlay').classList.remove('hidden');
   document.getElementById('user-dropdown').classList.remove('open');
-  switchAdminTab('users');
-  loadAdminStats();
+  switchAdminTab('overview');
 }
 
 function closeAdmin() {
@@ -5062,36 +5065,126 @@ function switchAdminTab(tab) {
   document.querySelectorAll('.admin-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
   document.querySelectorAll('.admin-tab-content').forEach(c => c.style.display = 'none');
   document.getElementById(`admin-tab-${tab}`).style.display = '';
-  if (tab === 'users') loadAdminUsers();
-  else if (tab === 'activity') loadAdminActivity();
+  if (tab === 'overview') loadAdminOverview();
+  else if (tab === 'users') loadAdminUsersTab();
+  else if (tab === 'content') loadAdminContentTab();
   else if (tab === 'feedback') loadAdminFeedback();
-  else if (tab === 'comments') loadAdminComments();
-  else if (tab === 'invitations') loadAdminInvitations();
-  else if (tab === 'prompts') loadAdminPrompts();
-  else if (tab === 'wishlist') loadAdminWishlist();
-  else if (tab === 'workers') loadAdminWorkers();
-  else if (tab === 'settings') loadAdminSettings();
+  else if (tab === 'system') loadAdminSystemTab();
 }
 
-async function loadAdminStats() {
-  const el = document.getElementById('admin-stats');
+function switchAdminSubTab(parentTab, subTab) {
+  if (parentTab === 'users') { _adminUsersSubTab = subTab; loadAdminUsersTab(); }
+  else if (parentTab === 'content') { _adminContentSubTab = subTab; loadAdminContentTab(); }
+  else if (parentTab === 'system') { _adminSystemSubTab = subTab; loadAdminSystemTab(); }
+}
+
+async function loadAdminOverview() {
+  const el = document.getElementById('admin-tab-overview');
+  el.innerHTML = '<p style="color:var(--text-dim);padding:12px;">Loading...</p>';
   try {
     const resp = await fetch('/api/admin/stats');
-    if (!resp.ok) { el.innerHTML = ''; return; }
+    if (!resp.ok) { el.innerHTML = '<p style="color:var(--error);padding:12px;">Failed to load stats.</p>'; return; }
     const s = await resp.json();
-    el.innerHTML = [
-      { val: s.users, label: 'Users' },
-      { val: s.songs, label: 'Songs' },
-      { val: s.storage_mb + ' MB', label: 'Storage' },
-      { val: s.comments, label: 'Comments' },
-      { val: s.feedback_new, label: 'Feedback' },
-      { val: s.queue_length, label: 'Queue' },
-    ].map(d => `<div class="admin-stat-group"><div class="admin-stat-label">${d.label}</div><div class="admin-stat"><div class="val">${d.val}</div></div></div>`).join('');
-  } catch (e) { el.innerHTML = ''; }
+    const storageMB = parseFloat(s.storage_mb) || 0;
+    const storageDisplay = storageMB >= 1000 ? (storageMB / 1000).toFixed(1) + ' GB' : storageMB.toFixed(0) + ' MB';
+
+    const types = ['', 'login', 'queue', 'view', 'invite', 'comment', 'vote'];
+    const typeLabels = { '': 'All Types', login: 'Login', queue: 'Queue', view: 'View', invite: 'Invite', comment: 'Comment', vote: 'Vote' };
+
+    el.innerHTML = `
+      <div class="admin-stats-row">
+        <div class="admin-stat-card">
+          <div class="val">${s.users}</div>
+          <div class="label">Users</div>
+        </div>
+        <div class="admin-stat-card">
+          <div class="val">${s.songs}</div>
+          <div class="label">Songs</div>
+        </div>
+        <div class="admin-stat-card">
+          <div class="val">${storageDisplay}</div>
+          <div class="label">Storage</div>
+        </div>
+        <div class="admin-stat-card${s.queue_length > 0 ? ' accent' : ''}">
+          <div class="val">${s.queue_length}</div>
+          <div class="label">In Queue</div>
+        </div>
+        <div class="admin-stat-card${s.feedback_new > 0 ? ' accent' : ''}">
+          <div class="val">${s.feedback_new}</div>
+          <div class="label">New Feedback</div>
+        </div>
+        <div class="admin-stat-card">
+          <div class="val">${s.comments}</div>
+          <div class="label">Comments</div>
+        </div>
+      </div>
+
+      <div style="margin-top:20px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+          <h4 style="color:var(--text-bright);font-size:1rem;font-weight:600;margin:0;">Activity</h4>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <select onchange="setActivityTypeFilter(this.value)" style="padding:5px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:0.82rem;font-family:inherit;cursor:pointer;">
+              ${types.map(t => `<option value="${t}"${_activityFilter === t ? ' selected' : ''}>${typeLabels[t]}</option>`).join('')}
+            </select>
+            <div style="display:flex;gap:4px;">
+              ${_TIME_PRESETS.map(p => `<button class="admin-filter-btn activity-time-btn${_activityTimePreset === p.hours ? ' active' : ''}" data-hours="${p.hours}" onclick="setActivityTimePreset(${p.hours})">${p.label}</button>`).join('')}
+            </div>
+          </div>
+        </div>
+        <div id="admin-activity-container">
+          <div class="activity-table-area">
+            <p style="color:var(--text-dim);padding:12px;">Loading...</p>
+          </div>
+        </div>
+      </div>`;
+
+    loadAdminActivity();
+  } catch (e) { el.innerHTML = '<p style="color:var(--error);padding:12px;">Failed to load stats.</p>'; }
+}
+
+function loadAdminUsersTab() {
+  const container = document.getElementById('admin-tab-users');
+  const sub = _adminUsersSubTab;
+  container.innerHTML = `
+    <div class="admin-sub-tabs">
+      <button class="admin-sub-tab${sub === 'users' ? ' active' : ''}" onclick="switchAdminSubTab('users','users')">Users</button>
+      <button class="admin-sub-tab${sub === 'invitations' ? ' active' : ''}" onclick="switchAdminSubTab('users','invitations')">Invitations</button>
+    </div>
+    <div id="admin-users-sub-content"></div>`;
+  if (sub === 'users') loadAdminUsers();
+  else loadAdminInvitations();
+}
+
+function loadAdminContentTab() {
+  const container = document.getElementById('admin-tab-content');
+  const sub = _adminContentSubTab;
+  container.innerHTML = `
+    <div class="admin-sub-tabs">
+      <button class="admin-sub-tab${sub === 'comments' ? ' active' : ''}" onclick="switchAdminSubTab('content','comments')">Comments</button>
+      <button class="admin-sub-tab${sub === 'wishlist' ? ' active' : ''}" onclick="switchAdminSubTab('content','wishlist')">Requests</button>
+    </div>
+    <div id="admin-content-sub-content"></div>`;
+  if (sub === 'comments') loadAdminComments();
+  else loadAdminWishlist();
+}
+
+function loadAdminSystemTab() {
+  const container = document.getElementById('admin-tab-system');
+  const sub = _adminSystemSubTab;
+  container.innerHTML = `
+    <div class="admin-sub-tabs">
+      <button class="admin-sub-tab${sub === 'workers' ? ' active' : ''}" onclick="switchAdminSubTab('system','workers')">Workers</button>
+      <button class="admin-sub-tab${sub === 'prompts' ? ' active' : ''}" onclick="switchAdminSubTab('system','prompts')">Prompts</button>
+      <button class="admin-sub-tab${sub === 'settings' ? ' active' : ''}" onclick="switchAdminSubTab('system','settings')">Settings</button>
+    </div>
+    <div id="admin-system-sub-content"></div>`;
+  if (sub === 'workers') loadAdminWorkers();
+  else if (sub === 'prompts') loadAdminPrompts();
+  else loadAdminSettings();
 }
 
 async function loadAdminUsers() {
-  const container = document.getElementById('admin-tab-users');
+  const container = document.getElementById('admin-users-sub-content') || document.getElementById('admin-tab-users');
   try {
     const resp = await fetch('/api/admin/users');
     if (!resp.ok) throw new Error('Server returned ' + resp.status);
@@ -5234,7 +5327,7 @@ async function saveAdminPerms(userId) {
 async function adminChangeRole(userId, newRole) {
   await fetch(`/api/admin/users/${userId}/role?role=${newRole}`, { method: 'PUT' });
   loadAdminUsers();
-  loadAdminStats();
+  if(document.getElementById('admin-tab-overview').style.display !== 'none') loadAdminOverview();
 }
 
 async function adminDeleteUser(userId, name) {
@@ -5246,7 +5339,7 @@ async function adminDeleteUser(userId, name) {
     return;
   }
   loadAdminUsers();
-  loadAdminStats();
+  if(document.getElementById('admin-tab-overview').style.display !== 'none') loadAdminOverview();
 }
 
 function toggleCreateUserForm() {
@@ -5271,7 +5364,7 @@ async function adminCreateUser() {
   if (resp.ok) {
     toggleCreateUserForm();
     loadAdminUsers();
-    loadAdminStats();
+    if(document.getElementById('admin-tab-overview').style.display !== 'none') loadAdminOverview();
   } else {
     const err = await resp.json().catch(() => ({}));
     showAlert(err.detail || 'Failed to create user');
@@ -5280,33 +5373,38 @@ async function adminCreateUser() {
 
 let _activityFilter = '';
 let _activityOffset = 0;
+let _activityTimePreset = 8; // hours, 0 = show all
 const _ACTIVITY_LIMIT = 50;
 const _EVENT_COLORS = {
   login: '#6b8', queue: 'var(--accent)', view: '#7eb8da',
   invite: '#c89dda', comment: '#d4a84b', vote: '#e07050',
 };
+const _TIME_PRESETS = [
+  { label: 'Last 1 hour', hours: 1 },
+  { label: 'Last 8 hours', hours: 8 },
+  { label: 'Last 24 hours', hours: 24 },
+  { label: 'Last 3 days', hours: 72 },
+  { label: 'Show All', hours: 0 },
+];
 
 async function loadAdminActivity(append) {
-  const container = document.getElementById('admin-tab-activity');
+  const container = document.getElementById('admin-activity-container');
+  if (!container) return;
   if (!append) {
     _activityOffset = 0;
-    container.innerHTML = '<p style="color:var(--text-dim);padding:12px;">Loading...</p>';
+    const list = container.querySelector('.activity-list');
+    if (list) list.innerHTML = '<p style="color:var(--text-dim);padding:16px 12px;">Loading...</p>';
+    else container.innerHTML = '<p style="color:var(--text-dim);padding:12px;">Loading...</p>';
   }
   try {
     const params = new URLSearchParams({ limit: _ACTIVITY_LIMIT, offset: _activityOffset });
     if (_activityFilter) params.set('event_type', _activityFilter);
+    if (_activityTimePreset > 0) params.set('since_hours', _activityTimePreset);
     const resp = await fetch('/api/admin/activity?' + params);
     if (!resp.ok) throw new Error();
     const data = await resp.json();
     const entries = data.entries || [];
     const total = data.total || 0;
-
-    const types = ['', 'login', 'queue', 'view', 'invite', 'comment', 'vote'];
-    const filterBar = `
-      <div style="display:flex;gap:6px;padding:8px 12px;flex-wrap:wrap;align-items:center;">
-        ${types.map(t => `<button class="admin-filter-btn${_activityFilter === t ? ' active' : ''}" onclick="_activityFilter='${t}'; loadAdminActivity()">${t || 'All'}</button>`).join('')}
-        <span style="margin-left:auto;font-size:0.7rem;color:var(--text-dim);">${total} total</span>
-      </div>`;
 
     const rows = entries.map(e => {
       const d = e.detail || {};
@@ -5319,12 +5417,12 @@ async function loadAdminActivity(append) {
       else if (e.event_type === 'invite') summary = d.email || '';
       else if (e.event_type === 'comment') summary = d.text || '';
       else if (e.event_type === 'vote') summary = d.title || d.job_id || d.wishlist_item_id || '';
-      if (summary.length > 60) summary = summary.substring(0, 60) + '...';
+      if (summary.length > 80) summary = summary.substring(0, 80) + '...';
       return `
-        <div style="display:flex;align-items:center;gap:10px;padding:6px 12px;border-bottom:1px solid var(--border-light);font-size:0.78rem;">
-          <span style="width:130px;flex-shrink:0;color:var(--text-muted);font-size:0.7rem;">${ts}</span>
-          <span style="width:90px;flex-shrink:0;font-weight:600;color:var(--text-bright);">${escapeHtml(e.user_name)}</span>
-          <span style="width:60px;flex-shrink:0;padding:1px 6px;border-radius:4px;text-align:center;font-size:0.65rem;font-weight:600;text-transform:uppercase;color:#fff;background:${color};">${e.event_type}</span>
+        <div style="display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1px solid var(--border-light);font-size:0.85rem;">
+          <span style="width:145px;flex-shrink:0;color:var(--text-muted);font-size:0.78rem;">${ts}</span>
+          <span style="width:100px;flex-shrink:0;font-weight:600;color:var(--text-bright);">${escapeHtml(e.user_name)}</span>
+          <span style="width:68px;flex-shrink:0;padding:2px 8px;border-radius:4px;text-align:center;font-size:0.72rem;font-weight:600;text-transform:uppercase;color:#fff;background:${color};">${e.event_type}</span>
           <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-dim);">${escapeHtml(summary)}</span>
         </div>`;
     }).join('');
@@ -5333,7 +5431,6 @@ async function loadAdminActivity(append) {
     const loadMoreBtn = hasMore ? `<div style="text-align:center;padding:12px;"><button class="admin-btn" onclick="_activityOffset+=${_ACTIVITY_LIMIT}; loadAdminActivity(true)">Load More</button></div>` : '';
 
     if (append) {
-      // Append rows to existing list
       const list = container.querySelector('.activity-list');
       if (list) {
         list.insertAdjacentHTML('beforeend', rows);
@@ -5341,16 +5438,43 @@ async function loadAdminActivity(append) {
         if (oldBtn) oldBtn.outerHTML = loadMoreBtn ? `<div class="activity-load-more">${loadMoreBtn}</div>` : '';
       }
     } else {
-      container.innerHTML = `
-        ${filterBar}
-        <div class="admin-section">
-          <div class="activity-list">${rows || '<p style="color:var(--text-dim);padding:16px 12px;">No activity yet.</p>'}</div>
-          ${hasMore ? `<div class="activity-load-more">${loadMoreBtn}</div>` : ''}
-        </div>`;
+      // Update just the table body, not the toolbar
+      const tableArea = container.querySelector('.activity-table-area');
+      if (tableArea) {
+        tableArea.innerHTML = `
+          <div class="admin-section">
+            <div class="activity-list">${rows || '<p style="color:var(--text-dim);padding:16px 12px;">No activity in this time range.</p>'}</div>
+            ${hasMore ? `<div class="activity-load-more">${loadMoreBtn}</div>` : ''}
+          </div>
+          <div style="text-align:right;padding:4px 0;font-size:0.78rem;color:var(--text-muted);">${total} event${total !== 1 ? 's' : ''}</div>`;
+      } else {
+        container.innerHTML = `
+          <div class="admin-section">
+            <div class="activity-list">${rows || '<p style="color:var(--text-dim);padding:16px 12px;">No activity in this time range.</p>'}</div>
+            ${hasMore ? `<div class="activity-load-more">${loadMoreBtn}</div>` : ''}
+          </div>`;
+      }
     }
   } catch (e) {
-    if (!append) container.innerHTML = '<p style="color:var(--error);padding:12px;">Failed to load activity.</p>';
+    if (!append) {
+      const tableArea = container.querySelector('.activity-table-area');
+      if (tableArea) tableArea.innerHTML = '<p style="color:var(--error);padding:12px;">Failed to load activity.</p>';
+      else container.innerHTML = '<p style="color:var(--error);padding:12px;">Failed to load activity.</p>';
+    }
   }
+}
+
+function setActivityTimePreset(hours) {
+  _activityTimePreset = hours;
+  _activityOffset = 0;
+  document.querySelectorAll('.activity-time-btn').forEach(b => b.classList.toggle('active', parseFloat(b.dataset.hours) === hours));
+  loadAdminActivity();
+}
+
+function setActivityTypeFilter(val) {
+  _activityFilter = val;
+  _activityOffset = 0;
+  loadAdminActivity();
 }
 
 async function loadAdminFeedback() {
@@ -5394,18 +5518,18 @@ async function loadAdminFeedback() {
 async function adminSetFeedbackStatus(fbId, status) {
   await fetch(`/api/admin/feedback/${fbId}?status=${status}`, { method: 'PUT' });
   loadAdminFeedback();
-  loadAdminStats();
+  if(document.getElementById('admin-tab-overview').style.display !== 'none') loadAdminOverview();
 }
 
 async function adminDeleteFeedback(fbId) {
   if (!await showConfirm('Delete this feedback?')) return;
   await fetch(`/api/admin/feedback/${fbId}`, { method: 'DELETE' });
   loadAdminFeedback();
-  loadAdminStats();
+  if(document.getElementById('admin-tab-overview').style.display !== 'none') loadAdminOverview();
 }
 
 async function loadAdminComments() {
-  const container = document.getElementById('admin-tab-comments');
+  const container = document.getElementById('admin-content-sub-content') || document.getElementById('admin-tab-content');
   try {
     const resp = await fetch('/api/admin/comments');
     const data = await resp.json();
@@ -5430,11 +5554,11 @@ async function adminDeleteComment(commentId) {
   if (!await showConfirm('Delete this comment?')) return;
   await fetch(`/api/admin/comments/${commentId}`, { method: 'DELETE' });
   loadAdminComments();
-  loadAdminStats();
+  if(document.getElementById('admin-tab-overview').style.display !== 'none') loadAdminOverview();
 }
 
 async function loadAdminInvitations() {
-  const container = document.getElementById('admin-tab-invitations');
+  const container = document.getElementById('admin-users-sub-content') || document.getElementById('admin-tab-users');
   try {
     const resp = await fetch('/api/admin/invitations');
     const data = await resp.json();
@@ -5483,7 +5607,7 @@ function copyInviteLink(btn, link) {
 }
 
 async function loadAdminPrompts() {
-  const container = document.getElementById('admin-tab-prompts');
+  const container = document.getElementById('admin-system-sub-content') || document.getElementById('admin-tab-system');
   container.innerHTML = '<p style="color:var(--text-dim);padding:12px;">Loading...</p>';
   try {
     const resp = await fetch('/api/admin/prompts');
@@ -5541,7 +5665,7 @@ function resetAdminPrompt() {
 let _adminWishlistFilter = 'all';
 
 async function loadAdminWishlist() {
-  const container = document.getElementById('admin-tab-wishlist');
+  const container = document.getElementById('admin-content-sub-content') || document.getElementById('admin-tab-content');
   container.innerHTML = '<p style="color:var(--text-dim);padding:12px;">Loading...</p>';
   try {
     const resp = await fetch('/api/admin/wishlist');
@@ -5620,7 +5744,7 @@ async function adminDeleteWishlist(itemId) {
 }
 
 async function loadAdminWorkers() {
-  const container = document.getElementById('admin-tab-workers');
+  const container = document.getElementById('admin-system-sub-content') || document.getElementById('admin-tab-system');
   container.innerHTML = '<p style="color:var(--text-dim);padding:12px;">Loading...</p>';
   try {
     const resp = await fetch('/api/admin/workers');
@@ -5648,23 +5772,27 @@ async function loadAdminWorkers() {
       </div>
       ${workers.length === 0 ? '<p style="color:var(--text-dim);font-size:0.8rem;padding:8px 0;">No workers configured. Add a worker to start processing queue items.</p>' : ''}
       ${workers.map(w => {
-        const statusColor = w.online && w.status === 'idle' ? 'var(--success)' : w.online && w.status === 'busy' ? '#d4a020' : 'var(--error)';
-        const statusIcon = w.online ? (w.status === 'idle' ? '●' : '◉') : '○';
-        const statusText = w.online ? w.status : 'offline';
-        const jobInfo = w.current_job ? ` — ${w.current_job.step_name || 'processing'}` : '';
-        return `<div class="admin-row" style="flex-wrap:wrap;gap:6px;">
-          <div style="flex:1;min-width:0;">
-            <span style="color:${statusColor};margin-right:4px;">${statusIcon}</span>
-            <span class="name">${escapeHtml(w.name)}</span>
-            <span class="meta" style="margin-left:6px;">${escapeHtml(w.url)}</span>
-            <span class="meta" style="margin-left:6px;">${w.device || ''}</span>
-            <span style="font-size:0.7rem;color:${statusColor};margin-left:6px;">${statusText}${jobInfo}</span>
-            ${w.last_seen ? `<span class="meta" style="margin-left:6px;">seen ${new Date(w.last_seen).toLocaleTimeString()}</span>` : ''}
+        const isOnline = w.online;
+        const isBusy = isOnline && w.status === 'busy';
+        const statusClass = isOnline ? (isBusy ? 'busy' : 'online') : 'offline';
+        const statusText = isOnline ? w.status : 'offline';
+        const jobInfo = w.current_job ? w.current_job.step_name || 'processing' : '';
+        return `<div class="admin-worker-card">
+          <div class="admin-worker-header">
+            <div class="admin-worker-status ${statusClass}"></div>
+            <span class="name" style="font-size:0.92rem;">${escapeHtml(w.name)}</span>
+            <span style="font-size:0.78rem;color:var(--text-muted);text-transform:uppercase;font-weight:500;">${statusText}</span>
+            ${jobInfo ? `<span style="font-size:0.78rem;color:var(--accent);font-style:italic;">${escapeHtml(jobInfo)}</span>` : ''}
+            <div class="admin-worker-actions">
+              <button class="admin-btn" onclick="testWorker('${w.id}')">Test</button>
+              <button class="admin-btn" onclick="toggleWorker('${w.id}')" style="color:${w.enabled !== false ? 'var(--success)' : 'var(--error)'};">${w.enabled !== false ? 'Enabled' : 'Disabled'}</button>
+              <button class="admin-btn danger" onclick="deleteWorker('${w.id}')">Remove</button>
+            </div>
           </div>
-          <div style="display:flex;gap:4px;align-items:center;">
-            <button onclick="testWorker('${w.id}')" style="padding:3px 8px;font-size:0.7rem;background:var(--bg-hover);color:var(--text);border:1px solid var(--border);border-radius:5px;cursor:pointer;">Test</button>
-            <button onclick="toggleWorker('${w.id}')" style="padding:3px 8px;font-size:0.7rem;background:var(--bg-hover);color:${w.enabled !== false ? 'var(--success)' : 'var(--error)'};border:1px solid var(--border);border-radius:5px;cursor:pointer;">${w.enabled !== false ? 'Enabled' : 'Disabled'}</button>
-            <button onclick="deleteWorker('${w.id}')" style="padding:3px 8px;font-size:0.7rem;background:var(--bg-hover);color:var(--error);border:1px solid var(--border);border-radius:5px;cursor:pointer;">Remove</button>
+          <div class="admin-worker-meta">
+            <span>${escapeHtml(w.url)}</span>
+            ${w.device ? `<span>${w.device}</span>` : ''}
+            ${w.last_seen ? `<span>Last seen ${new Date(w.last_seen).toLocaleTimeString()}</span>` : ''}
           </div>
         </div>`;
       }).join('')}
@@ -5724,7 +5852,7 @@ async function deleteWorker(workerId) {
 }
 
 async function loadAdminSettings() {
-  const container = document.getElementById('admin-tab-settings');
+  const container = document.getElementById('admin-system-sub-content') || document.getElementById('admin-tab-system');
   container.innerHTML = '<p style="color:var(--text-dim);padding:12px;">Loading...</p>';
   try {
     const resp = await fetch('/api/admin/settings');
