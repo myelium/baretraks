@@ -9,6 +9,9 @@ Usage:
     WORKER_PORT=8002 python worker.py          # custom port
 """
 
+from dotenv import load_dotenv
+load_dotenv()
+
 import json
 import logging
 import os
@@ -22,7 +25,6 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-import boto3
 import httpx
 import torch
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -48,11 +50,6 @@ if DEVICE == "auto":
 DEMUCS_MODEL = os.getenv("DEMUCS_MODEL", "htdemucs_ft")
 WORK_DIR = Path(os.getenv("WORKER_WORK_DIR", "worker_output"))
 
-# R2 config
-R2_ENDPOINT_URL = os.getenv("R2_ENDPOINT_URL", "")
-R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID", "")
-R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY", "")
-R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME", "")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -82,24 +79,8 @@ def verify_api_key(request: Request):
 # R2 Upload
 # ---------------------------------------------------------------------------
 
-def _get_r2_client():
-    if not R2_ENDPOINT_URL:
-        return None
-    return boto3.client(
-        "s3",
-        endpoint_url=R2_ENDPOINT_URL,
-        aws_access_key_id=R2_ACCESS_KEY_ID,
-        aws_secret_access_key=R2_SECRET_ACCESS_KEY,
-        region_name="auto",
-    )
-
-
-def _upload_to_r2(local_path: Path, r2_key: str) -> int:
-    """Upload a file to R2. Returns file size in bytes."""
-    client = _get_r2_client()
-    if not client:
-        logger.warning("R2 not configured — skipping upload of %s", r2_key)
-        return 0
+def _upload_via_presigned(local_path: Path, presigned_url: str) -> int:
+    """Upload a file using a presigned PUT URL. Returns file size in bytes."""
     content_types = {
         ".mp4": "video/mp4",
         ".mp3": "audio/mpeg",
@@ -107,10 +88,35 @@ def _upload_to_r2(local_path: Path, r2_key: str) -> int:
         ".srt": "text/plain; charset=utf-8",
     }
     ct = content_types.get(local_path.suffix, "application/octet-stream")
-    client.upload_file(str(local_path), R2_BUCKET_NAME, r2_key, ExtraArgs={"ContentType": ct})
     size = local_path.stat().st_size
-    logger.info("Uploaded %s (%d bytes)", r2_key, size)
+    with open(local_path, "rb") as f:
+        resp = httpx.put(presigned_url, content=f, headers={"Content-Type": ct},
+                         timeout=300)
+    if resp.status_code >= 400:
+        logger.error("Presigned upload failed (%d): %s", resp.status_code, resp.text[:200])
+        return 0
+    logger.info("Uploaded %s (%d bytes)", local_path.name, size)
     return size
+
+
+def _request_upload_urls(callback_url: str, callback_key: str,
+                         job_id: str, filenames: list[str]) -> dict[str, str]:
+    """Request presigned upload URLs from the app."""
+    headers = {"Content-Type": "application/json"}
+    if callback_key:
+        headers["Authorization"] = f"Bearer {callback_key}"
+    try:
+        resp = httpx.post(
+            f"{callback_url}/api/worker/upload-urls",
+            json={"job_id": job_id, "filenames": filenames},
+            headers=headers, timeout=15,
+        )
+        if resp.status_code == 200:
+            return resp.json().get("urls", {})
+        logger.warning("Failed to get upload URLs: %d", resp.status_code)
+    except Exception as e:
+        logger.error("Failed to request upload URLs: %s", e)
+    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -621,20 +627,29 @@ def _execute_job(job: dict):
             })
             return
 
-        # Upload output files to R2
-        r2_keys = []
-        total_size = 0
-        upload_files = ["karaoke.mp4", "instrumental.mp3", "vocals.mp3", "lyrics.json"]
-        for fname in upload_files:
+        # Collect files to upload
+        upload_files = {}
+        for fname in ["karaoke.mp4", "instrumental.mp3", "vocals.mp3", "lyrics.json"]:
             fpath = output_dir / fname
             if fpath.exists():
-                key = f"{r2_prefix}/{fname}"
-                total_size += _upload_to_r2(fpath, key)
-                r2_keys.append(key)
+                upload_files[fname] = fpath
         for srt in output_dir.glob("subtitles_*.srt"):
-            key = f"{r2_prefix}/{srt.name}"
-            total_size += _upload_to_r2(srt, key)
-            r2_keys.append(key)
+            upload_files[srt.name] = srt
+
+        # Request presigned upload URLs from the app
+        r2_keys = []
+        total_size = 0
+        if upload_files:
+            urls = _request_upload_urls(callback_url, callback_key,
+                                        job_id, list(upload_files.keys()))
+            for fname, fpath in upload_files.items():
+                presigned_url = urls.get(fname)
+                if presigned_url:
+                    size = _upload_via_presigned(fpath, presigned_url)
+                    total_size += size
+                    r2_keys.append(f"{r2_prefix}/{fname}")
+                else:
+                    logger.warning("No presigned URL for %s — skipping", fname)
 
         # Build completion payload
         completion_data = {

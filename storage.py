@@ -53,6 +53,9 @@ class LocalStorage:
             return path.read_text()
         return None
 
+    def generate_presigned_upload(self, key: str, expires_in: int = 3600) -> str | None:
+        return None
+
     def is_r2(self) -> bool:
         return False
 
@@ -133,6 +136,18 @@ class R2Storage:
             resp = self._client.get_object(Bucket=self._bucket_name, Key=key)
             return resp["Body"].read().decode("utf-8")
         except Exception:
+            return None
+
+    def generate_presigned_upload(self, key: str, expires_in: int = 3600) -> str | None:
+        """Generate a presigned PUT URL scoped to a single key. Expires in 1 hour."""
+        try:
+            return self._client.generate_presigned_url(
+                "put_object",
+                Params={"Bucket": self._bucket_name, "Key": key},
+                ExpiresIn=expires_in,
+            )
+        except Exception as e:
+            logger.error("Failed to generate presigned URL for %s: %s", key, e)
             return None
 
     def is_r2(self) -> bool:

@@ -562,6 +562,32 @@ async def worker_failed(request: Request):
     return {"ok": True}
 
 
+@app.post("/api/worker/upload-urls")
+async def worker_upload_urls(request: Request):
+    """Generate presigned upload URLs for a worker to upload job files to R2."""
+    if not _verify_worker_key(request):
+        raise HTTPException(401, "Invalid worker key")
+    data = await request.json()
+    job_id = data.get("job_id")
+    filenames = data.get("filenames", [])
+    if not job_id or not filenames:
+        raise HTTPException(400, "job_id and filenames required")
+
+    if not storage.is_r2():
+        raise HTTPException(501, "R2 storage not configured")
+
+    urls = {}
+    for fname in filenames:
+        # Only allow expected file types
+        if not fname.endswith((".mp4", ".mp3", ".json", ".srt")):
+            continue
+        key = f"jobs/{job_id}/{fname}"
+        url = storage.generate_presigned_upload(key)
+        if url:
+            urls[fname] = url
+    return {"urls": urls}
+
+
 # ---------------------------------------------------------------------------
 # Admin worker management endpoints
 # ---------------------------------------------------------------------------

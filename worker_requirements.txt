@@ -9,7 +9,6 @@ ffmpeg-python
 imageio-ffmpeg
 anthropic
 httpx
-boto3
 fastapi
 uvicorn[standard]
 python-dotenv
