@@ -1659,8 +1659,8 @@
   }
   .player-overlay-actions {
     position: absolute;
-    top: 8px;
-    right: 8px;
+    top: 0;
+    right: 0;
     display: flex;
     align-items: center;
     gap: 4px;
@@ -1682,11 +1682,11 @@
     background: none;
     border: none;
     color: #8a7e6b;
-    font-size: 2rem;
+    font-size: 1.6rem;
     cursor: pointer;
     line-height: 1;
-    padding: 4px 8px;
-    border-radius: 8px;
+    padding: 10px 14px;
+    border-radius: 0 16px 0 8px;
     transition: color 0.2s, background 0.2s;
   }
   .player-overlay-close:hover { color: #e8d5a3; background: rgba(255,255,255,0.05); }
@@ -2621,7 +2621,8 @@ function getStepNamesForMode(mode) {
   return STEP_NAMES_KARAOKE;
 }
 let pollInterval = null;
-let currentJob = null;
+let currentJob = null;       // active queue job (from polling)
+let _playerItem = null;      // library item shown in the player overlay
 let lyricsData = null;
 let activeMediaEl = null;
 let paneState = 'default'; // 'default' (30/70) | 'lib-expanded' (0/100)
@@ -2664,6 +2665,7 @@ function closePlayer() {
   const overlay = document.getElementById('player-overlay');
   if (!overlay || overlay.classList.contains('hidden')) return;
   stopAllMedia();
+  _playerItem = null;
   if (_playerResizeObs) { _playerResizeObs.disconnect(); _playerResizeObs = null; }
   overlay.classList.add('hidden');
   if (window.location.hash.startsWith('#/watch/')) {
@@ -3837,19 +3839,19 @@ async function showPlayerForJob(jobId) {
     } catch (e) {}
   }
   if (item) {
-    currentJob = { ...item, status: 'done' };
+    _playerItem = { ...item, status: 'done' };
   } else {
     // Not in library — might be currently processing
     try {
       const resp = await fetch('/api/jobs/current');
       const data = await resp.json();
       if (data.job && data.job.id === jobId) {
-        currentJob = data.job;
+        _playerItem = data.job;
       } else {
-        currentJob = { id: jobId, title: 'Unknown', status: 'done' };
+        _playerItem = { id: jobId, title: 'Unknown', status: 'done' };
       }
     } catch (e) {
-      currentJob = { id: jobId, title: 'Unknown', status: 'done' };
+      _playerItem = { id: jobId, title: 'Unknown', status: 'done' };
     }
   }
 
@@ -3858,7 +3860,7 @@ async function showPlayerForJob(jobId) {
   document.getElementById('player-overlay').classList.remove('hidden');
   window.location.hash = `/watch/${jobId}`;
 
-  const jobMode = currentJob.mode || 'karaoke';
+  const jobMode = _playerItem.mode || 'karaoke';
 
   // Load comments for this song
   loadComments(jobId);
@@ -3870,8 +3872,8 @@ async function showPlayerForJob(jobId) {
       lyricsData = await resp.json();
     } catch (e) { lyricsData = []; }
     const _subItem = libraryItems.find(i => i.id === jobId);
-    const _subUrl = _subItem?.url || currentJob?.url || '';
-    const _subLangs = _subItem?.languages || currentJob?.languages || (currentJob?.language ? [currentJob.language] : []);
+    const _subUrl = _subItem?.url || _playerItem?.url || '';
+    const _subLangs = _subItem?.languages || _playerItem?.languages || [];
     renderSubtitledPlayer(jobId, _subUrl, _subLangs);
     renderLyrics();
     const lyricsTabs = document.getElementById('lyrics-tabs');
@@ -3902,10 +3904,9 @@ async function showPlayer() {
 
 function _renderPlayerTitleInfo(jobId) {
   const item = libraryItems.find(i => i.id === jobId);
-  // Library item has LLM-enriched metadata; currentJob has raw YouTube data
-  const title = item?.title || currentJob?.title || '';
-  const artist = item?.artist || currentJob?.artist || '';
-  const year = item?.year || currentJob?.year || '';
+  const title = item?.title || _playerItem?.title || '';
+  const artist = item?.artist || _playerItem?.artist || '';
+  const year = item?.year || _playerItem?.year || '';
   const editLink = currentUser ? `<a style="font-size:0.65rem;color:var(--text-muted);cursor:pointer;opacity:0.6;margin-left:4px;" onclick="event.stopPropagation(); openEditMetadata('${jobId}')">edit</a>` : '';
   const artistYear = [artist, year ? `(${year})` : ''].filter(Boolean).join(' ');
   const line2 = artistYear ? `<div style="font-size:0.72rem;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(artistYear)}${editLink}</div>` : (editLink ? `<div style="font-size:0.72rem;">${editLink}</div>` : '');
@@ -3917,11 +3918,10 @@ function _renderPlayerTitleInfo(jobId) {
 
 function openEditMetadata(jobId) {
   const item = libraryItems.find(i => i.id === jobId);
-  // Use library item (LLM-enriched) as primary source, same as _renderPlayerTitleInfo
-  const title = item?.title || currentJob?.title || '';
-  const artist = item?.artist || currentJob?.artist || '';
-  const year = item?.year || currentJob?.year || '';
-  const url = item?.url || currentJob?.url || '';
+  const title = item?.title || _playerItem?.title || '';
+  const artist = item?.artist || _playerItem?.artist || '';
+  const year = item?.year || _playerItem?.year || '';
+  const url = item?.url || _playerItem?.url || '';
 
   const overlay = document.createElement('div');
   overlay.className = 'confirm-overlay';
@@ -3976,10 +3976,10 @@ async function saveEditMetadata(jobId) {
       item.artist = data.artist;
       item.year = data.year;
     }
-    if (currentJob && currentJob.id === jobId) {
-      currentJob.title = data.title;
-      currentJob.artist = data.artist;
-      currentJob.year = data.year;
+    if (_playerItem && _playerItem.id === jobId) {
+      _playerItem.title = data.title;
+      _playerItem.artist = data.artist;
+      _playerItem.year = data.year;
     }
 
     // Update the title info in the player (re-render via helper)
@@ -4005,7 +4005,7 @@ function renderTabs(jobId) {
 
 function _isBothMode(jobId) {
   const item = libraryItems.find(i => i.id === jobId);
-  return (item?.mode || currentJob?.mode) === 'both';
+  return (item?.mode || _playerItem?.mode) === 'both';
 }
 
 function flipPlayerMode(jobId) {
@@ -4044,7 +4044,7 @@ let vocalsOn = false;
 let _currentVideoJobId = null;
 
 function switchTab(tab, jobId) {
-  const id = jobId || currentJob.id;
+  const id = jobId || (_playerItem ? _playerItem.id : '');
 
   _tabsEl().querySelectorAll('.tab').forEach(t => {
     t.classList.toggle('active', t.dataset.tab === tab);
@@ -4102,8 +4102,8 @@ function switchTab(tab, jobId) {
     _currentPlayerTab = 'subtitled';
     // Subtitled tab for "both" mode — render YouTube player with subtitle overlay
     const _item = libraryItems.find(i => i.id === id);
-    const langs = _item?.languages || currentJob?.languages || (currentJob?.language ? [currentJob.language] : []);
-    const _url = _item?.url || currentJob?.url || '';
+    const langs = _item?.languages || _playerItem?.languages || [];
+    const _url = _item?.url || _playerItem?.url || '';
     renderSubtitledPlayer(id, _url, langs);
     renderLyrics();
     const lyricsTabs = document.getElementById('lyrics-tabs');
@@ -4807,8 +4807,7 @@ function copyShareLink() {
 }
 
 function sharePlayer() {
-  const url = window.location.href;
-  shareLink(currentJob ? currentJob.id : '');
+  shareLink(_playerItem ? _playerItem.id : '');
 }
 
 let currentUser = null;

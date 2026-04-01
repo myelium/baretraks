@@ -24,7 +24,7 @@ from auth import (
     get_optional_user, hash_password, is_admin, require_admin, verify_password,
 )
 from database import get_db, get_session
-from models import ActivityLog, AppConfig, Comment, Feedback, Invitation, JobMetadata, Playlist, PlaylistItem, User, UserPermissions, Vote, WishlistItem, WishlistVote
+from models import ActivityLog, AppConfig, Comment, Feedback, Invitation, LibraryItem, Playlist, PlaylistItem, User, UserPermissions, Vote, WishlistItem, WishlistVote
 from storage import storage
 
 import logging
@@ -287,12 +287,12 @@ def _on_job_completed(job_id: str, data: dict) -> None:
         _active_jobs.pop(job_id, None)
     _save_queue()
 
-    # Save to JobMetadata
+    # Save to LibraryItem
     try:
         db = get_session()
-        meta = db.query(JobMetadata).filter(JobMetadata.job_id == job_id).first()
+        meta = db.query(LibraryItem).filter(LibraryItem.job_id == job_id).first()
         if not meta:
-            meta = JobMetadata(job_id=job_id)
+            meta = LibraryItem(job_id=job_id)
             db.add(meta)
 
         meta.title = meta.title or (queue_item or {}).get("title")
@@ -337,7 +337,7 @@ def _on_job_completed(job_id: str, data: dict) -> None:
             result = analyze_lyrics(lyrics_text, title=title, artist=artist,
                                     custom_prompt=custom_prompt)
             _db = get_session()
-            _meta = _db.query(JobMetadata).filter(JobMetadata.job_id == job_id).first()
+            _meta = _db.query(LibraryItem).filter(LibraryItem.job_id == job_id).first()
             if _meta:
                 _meta.analysis_text = result.get("analysis", "")
                 _meta.analysis_song_info = result.get("song_info", "")
@@ -744,7 +744,7 @@ def _run_migrations() -> None:
         if "can_request_songs" not in perm_cols:
             conn.execute(text("ALTER TABLE user_permissions ADD COLUMN can_request_songs BOOLEAN NOT NULL DEFAULT TRUE"))
 
-    # --- JobMetadata: year column ---
+    # --- LibraryItem: year column ---
     if "job_metadata" in set(insp.get_table_names()):
         jm_cols = {c["name"] for c in insp.get_columns("job_metadata")}
         if "year" not in jm_cols:
@@ -753,14 +753,14 @@ def _run_migrations() -> None:
             # Backfill year from existing analysis_song_info, e.g. "Alone by Heart (1987)"
             import re as _re
             _db = get_session()
-            for m in _db.query(JobMetadata).filter(JobMetadata.analysis_song_info.isnot(None)).all():
+            for m in _db.query(LibraryItem).filter(LibraryItem.analysis_song_info.isnot(None)).all():
                 match = _re.search(r"\((\d{4})\)", m.analysis_song_info or "")
                 if match:
                     m.year = match.group(1)
             _db.commit()
             _db.close()
 
-    # --- JobMetadata: subtitles column ---
+    # --- LibraryItem: subtitles column ---
     if "job_metadata" in set(insp.get_table_names()):
         jm_cols2 = {c["name"] for c in insp.get_columns("job_metadata")}
         if "subtitles" not in jm_cols2:
@@ -768,7 +768,7 @@ def _run_migrations() -> None:
                 conn.execute(text("ALTER TABLE job_metadata ADD COLUMN subtitles TEXT"))
             # Backfill from local SRT files or R2
             _db = get_session()
-            for m in _db.query(JobMetadata).filter(JobMetadata.status == "done").all():
+            for m in _db.query(LibraryItem).filter(LibraryItem.status == "done").all():
                 srt_data = {}
                 job_dir = JOBS_DIR / m.job_id
                 if job_dir.exists():
@@ -1203,10 +1203,10 @@ def add_to_queue(req: QueueRequest, user: User | None = Depends(get_optional_use
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         _db = get_session()
         try:
-            today_jobs = _db.query(JobMetadata).filter(
-                JobMetadata.added_by_id == str(user.id),
-                JobMetadata.status == "done",
-                JobMetadata.finished_at >= today_str,
+            today_jobs = _db.query(LibraryItem).filter(
+                LibraryItem.added_by_id == str(user.id),
+                LibraryItem.status == "done",
+                LibraryItem.finished_at >= today_str,
             ).all()
             user_today_karaoke = sum(1 for j in today_jobs if (j.mode or "karaoke") == "karaoke")
             user_today_subtitled = sum(1 for j in today_jobs if (j.mode or "karaoke") in ("subtitled", "both"))
@@ -1444,7 +1444,7 @@ def get_library(user: User | None = Depends(get_optional_user),
     from sqlalchemy import func
 
     # Query completed jobs from DB
-    meta_rows = db.query(JobMetadata).filter(JobMetadata.status == "done").all()
+    meta_rows = db.query(LibraryItem).filter(LibraryItem.status == "done").all()
     if not meta_rows:
         return {"items": []}
 
@@ -1502,7 +1502,7 @@ def check_url_in_library(url: str, mode: str = "karaoke",
     if not video_id:
         return {"found": False}
 
-    rows = db.query(JobMetadata).filter(JobMetadata.status == "done").all()
+    rows = db.query(LibraryItem).filter(LibraryItem.status == "done").all()
     for meta in rows:
         existing_mode = meta.mode or "karaoke"
         if existing_mode != mode and not (existing_mode == "both" and mode in ("karaoke", "subtitled")):
@@ -1555,9 +1555,9 @@ def stream_vocals(job_id: str):
 def record_view(job_id: str, user: User | None = Depends(get_optional_user),
                 db: Session = Depends(get_db)):
     """Increment the view count for a job."""
-    meta = db.query(JobMetadata).filter(JobMetadata.job_id == job_id).first()
+    meta = db.query(LibraryItem).filter(LibraryItem.job_id == job_id).first()
     if not meta:
-        meta = JobMetadata(job_id=job_id, view_count=1)
+        meta = LibraryItem(job_id=job_id, view_count=1)
         db.add(meta)
     else:
         meta.view_count = (meta.view_count or 0) + 1
@@ -1569,7 +1569,7 @@ def record_view(job_id: str, user: User | None = Depends(get_optional_user),
 @app.get("/api/jobs/{job_id}/lyrics")
 def get_lyrics(job_id: str, db: Session = Depends(get_db)):
     # Prefer DB (lyrics travel with the library item)
-    meta = db.query(JobMetadata).filter(JobMetadata.job_id == job_id).first()
+    meta = db.query(LibraryItem).filter(LibraryItem.job_id == job_id).first()
     if meta and meta.lyrics:
         return json.loads(meta.lyrics)
     # Fallback to local file (during active job processing)
@@ -1680,7 +1680,7 @@ def save_prompts(req: dict, user: User = Depends(get_current_user)):
 @app.post("/api/jobs/{job_id}/analysis/rerun")
 def rerun_analysis(job_id: str, db: Session = Depends(get_db)):
     """Clear cached analysis so it regenerates on next fetch."""
-    meta = db.query(JobMetadata).filter(JobMetadata.job_id == job_id).first()
+    meta = db.query(LibraryItem).filter(LibraryItem.job_id == job_id).first()
     if meta:
         meta.analysis_text = None
         meta.analysis_song_info = None
@@ -1692,7 +1692,7 @@ def rerun_analysis(job_id: str, db: Session = Depends(get_db)):
 def get_analysis(job_id: str, db: Session = Depends(get_db)):
     """Return cached or generate line-by-line lyric analysis."""
     # Check DB cache first
-    meta = db.query(JobMetadata).filter(JobMetadata.job_id == job_id).first()
+    meta = db.query(LibraryItem).filter(LibraryItem.job_id == job_id).first()
     if meta and meta.analysis_text and len(meta.analysis_text) > 10:
         return {"song_info": meta.analysis_song_info or "", "analysis": meta.analysis_text}
 
@@ -1724,7 +1724,7 @@ def get_analysis(job_id: str, db: Session = Depends(get_db)):
 
     # Save to DB
     if not meta:
-        meta = JobMetadata(job_id=job_id)
+        meta = LibraryItem(job_id=job_id)
         db.add(meta)
     analysis_text = result.get("analysis", "")
     meta.analysis_text = analysis_text if analysis_text else None
@@ -1748,7 +1748,7 @@ def get_subtitles_lang(job_id: str, lang_code: str, db: Session = Depends(get_db
     if not re.match(r"^[a-z]{2,3}(-[A-Za-z]{2,4})?$", lang_code):
         raise HTTPException(400, "Invalid language code")
     # Try DB first
-    meta = db.query(JobMetadata).filter(JobMetadata.job_id == job_id).first()
+    meta = db.query(LibraryItem).filter(LibraryItem.job_id == job_id).first()
     if meta and meta.subtitles:
         srt_data = json.loads(meta.subtitles)
         if lang_code in srt_data:
@@ -1769,7 +1769,7 @@ def get_subtitles_lang(job_id: str, lang_code: str, db: Session = Depends(get_db
 def get_subtitles(job_id: str, db: Session = Depends(get_db)):
     """Serve first available SRT file."""
     # Try DB first
-    meta = db.query(JobMetadata).filter(JobMetadata.job_id == job_id).first()
+    meta = db.query(LibraryItem).filter(LibraryItem.job_id == job_id).first()
     if meta and meta.subtitles:
         srt_data = json.loads(meta.subtitles)
         if srt_data:
@@ -1803,7 +1803,7 @@ def update_job_metadata(job_id: str, req: UpdateJobRequest,
                         db: Session = Depends(get_db)):
     """Update editable job metadata (title, artist)."""
     # Update DB (source of truth)
-    meta = db.query(JobMetadata).filter(JobMetadata.job_id == job_id).first()
+    meta = db.query(LibraryItem).filter(LibraryItem.job_id == job_id).first()
     if not meta:
         raise HTTPException(404, "Job not found")
     if req.title is not None:
@@ -1837,7 +1837,7 @@ def delete_job(job_id: str, user: User = Depends(get_current_user)):
     job_dir = JOBS_DIR / job_id
     has_local = job_dir.exists() and job_dir.is_dir()
     _db = get_session()
-    has_db = _db.query(JobMetadata).filter(JobMetadata.job_id == job_id).first() is not None
+    has_db = _db.query(LibraryItem).filter(LibraryItem.job_id == job_id).first() is not None
     if not has_local and not has_db:
         _db.close()
         raise HTTPException(404, "Job not found")
@@ -1858,7 +1858,7 @@ def delete_job(job_id: str, user: User = Depends(get_current_user)):
 
     # Clean up DB metadata (votes, comments, job metadata)
     try:
-        _db.query(JobMetadata).filter(JobMetadata.job_id == job_id).delete()
+        _db.query(LibraryItem).filter(LibraryItem.job_id == job_id).delete()
         _db.query(Vote).filter(Vote.job_id == job_id).delete()
         _db.query(Comment).filter(Comment.job_id == job_id).delete()
         _db.commit()
@@ -2154,8 +2154,8 @@ def admin_stats(admin: User = Depends(require_admin), db: Session = Depends(get_
     feedback_new = db.query(func.count(Feedback.id)).filter(Feedback.status == "new").scalar()
 
     # Library stats from DB
-    total_songs = db.query(func.count(JobMetadata.job_id)).filter(JobMetadata.status == "done").scalar() or 0
-    total_size_bytes = db.query(func.coalesce(func.sum(JobMetadata.file_size_bytes), 0)).filter(JobMetadata.status == "done").scalar() or 0
+    total_songs = db.query(func.count(LibraryItem.job_id)).filter(LibraryItem.status == "done").scalar() or 0
+    total_size_bytes = db.query(func.coalesce(func.sum(LibraryItem.file_size_bytes), 0)).filter(LibraryItem.status == "done").scalar() or 0
 
     # Queue status
     with _lock:
