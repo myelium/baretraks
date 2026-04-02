@@ -9,8 +9,11 @@ Usage:
     WORKER_PORT=8002 python worker.py          # custom port
 """
 
+from pathlib import Path as _Path
 from dotenv import load_dotenv
-load_dotenv()
+# Load .env from this directory or parent (repo root)
+load_dotenv(_Path(__file__).resolve().parent / ".env")
+load_dotenv(_Path(__file__).resolve().parent.parent / ".env")
 
 import json
 import logging
