@@ -6724,7 +6724,7 @@ function renderWishlistGrid() {
 
   let filtered = wishlistItems.filter(item => {
     if (query) {
-      const haystack = [item.title, item.artist, item.note].filter(Boolean).join(' ').toLowerCase();
+      const haystack = [item.title, item.artist, item.note, item.url, item.user_name].filter(Boolean).join(' ').toLowerCase();
       if (!haystack.includes(query)) return false;
     }
     return true;
@@ -6746,18 +6746,27 @@ function renderWishlistGrid() {
     const thumb = item.thumbnail
       ? `<img class="library-thumb" src="${item.thumbnail}" alt="" loading="lazy" />`
       : `<div class="library-thumb" style="display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:2rem;">&#9835;</div>`;
-    const noteSnippet = item.note ? `<p style="font-size:0.72rem;color:var(--text-dim);margin:2px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-style:italic;">"${escapeHtml(item.note)}"</p>` : '';
     const votedStyle = item.user_voted ? 'color:var(--accent);border-color:var(--accent);' : '';
     const fulfilledBadge = item.status === 'fulfilled' && item.fulfilled_by_job_id
       ? `<span style="font-size:0.7rem;color:var(--accent);cursor:pointer;" onclick="showPlayerForJob('${item.fulfilled_by_job_id}')">&#9654; Ready</span>`
       : '';
+    const canDelete = currentUser && (item.user_id === String(currentUser.id) || currentUser.role === 'admin');
+    const deleteBtn = canDelete ? `<button class="library-delete-btn" onclick="event.stopPropagation(); deleteWishlistItem('${item.id}')" title="Delete request">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+    </button>` : '';
+    const urlLine = item.url ? `<div style="font-size:0.68rem;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:4px;">
+      <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--text-muted);text-decoration:none;">${escapeHtml(item.url)}</a></div>` : '';
+    const artistLine = item.artist ? `<div style="font-size:0.78rem;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(item.artist)}</div>` : '';
+    const noteLine = item.note ? `<div style="font-size:0.72rem;color:var(--text-dim);margin-top:4px;font-style:italic;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">"${escapeHtml(item.note)}"</div>` : '';
     return `
       <div class="library-item">
-        <div class="library-item-header">${thumb}</div>
+        <div class="library-item-header">${thumb}${deleteBtn}</div>
         <div class="library-info">
           <h3>${escapeHtml(item.title)}</h3>
-          ${item.artist ? `<div class="channel">${escapeHtml(item.artist)}</div>` : ''}
-          ${noteSnippet}
+          ${artistLine}
+          ${urlLine}
+          <div class="info-spacer"></div>
+          ${noteLine}
           <div class="meta" style="display:flex;align-items:center;justify-content:space-between;margin-top:4px;">
             <span>by ${escapeHtml(item.user_name || 'Anonymous')}</span>
             <span style="display:flex;align-items:center;gap:6px;">
@@ -6781,6 +6790,17 @@ async function toggleWishlistVote(itemId) {
     const data = await resp.json();
     const item = wishlistItems.find(i => i.id === itemId);
     if (item) { item.vote_count = data.vote_count; item.user_voted = data.user_voted; }
+    renderWishlistGrid();
+  } catch (e) { showAlert('Error: ' + e.message); }
+}
+
+async function deleteWishlistItem(itemId) {
+  const ok = await showConfirm('Delete this request?');
+  if (!ok) return;
+  try {
+    const resp = await fetch(`/api/wishlist/${itemId}`, { method: 'DELETE' });
+    if (!resp.ok) { const d = await resp.json().catch(() => ({})); showAlert(d.detail || 'Delete failed'); return; }
+    wishlistItems = wishlistItems.filter(i => i.id !== itemId);
     renderWishlistGrid();
   } catch (e) { showAlert('Error: ' + e.message); }
 }

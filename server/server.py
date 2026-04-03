@@ -2260,6 +2260,20 @@ def toggle_wishlist_vote(item_id: str, user: User = Depends(get_current_user),
     return {"item_id": str(item.id), "vote_count": count, "user_voted": voted}
 
 
+@app.delete("/api/wishlist/{item_id}")
+def delete_wishlist_item(item_id: str, user: User = Depends(get_current_user),
+                         db: Session = Depends(get_db)):
+    """Delete own wishlist request. Admins can delete any."""
+    item = db.query(WishlistItem).filter(WishlistItem.id == item_id).first()
+    if not item:
+        raise HTTPException(404, "Wishlist item not found")
+    if item.user_id != user.id and not is_admin(user):
+        raise HTTPException(403, "You can only delete your own requests")
+    db.delete(item)
+    db.commit()
+    return {"deleted": True}
+
+
 @app.get("/api/wishlist/preview")
 def preview_wishlist_url(url: str, user: User = Depends(get_current_user)):
     """Fetch YouTube metadata for preview in request form (via worker)."""
