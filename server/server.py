@@ -429,7 +429,7 @@ WORKER_API_KEY = os.getenv("WORKER_API_KEY", "")
 def _verify_worker_key(request) -> bool:
     """Check if the request has a valid worker API key."""
     if not WORKER_API_KEY:
-        return True  # no auth configured
+        return False  # reject if no key configured
     auth = request.headers.get("Authorization", "")
     if auth.startswith("Bearer "):
         return auth[7:] == WORKER_API_KEY
@@ -715,16 +715,6 @@ def _startup() -> None:
             break
     if changed:
         _save_queue()
-
-    # One-time schema fix: widen picture_url for Google OAuth URLs
-    try:
-        from sqlalchemy import text as _text
-        _db = get_session()
-        _db.execute(_text("ALTER TABLE users ALTER COLUMN picture_url TYPE VARCHAR(2048)"))
-        _db.commit()
-        _db.close()
-    except Exception:
-        pass  # already done or not needed
 
     # Clean up orphaned invitations (accepted by users who were later deleted)
     try:
