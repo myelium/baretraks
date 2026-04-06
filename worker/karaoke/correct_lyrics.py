@@ -54,7 +54,8 @@ def _strip_non_lyrics(words: list[dict]) -> list[dict]:
 
 
 def correct_lyrics(words: list[dict], title: str | None = None,
-                   artist: str | None = None) -> dict:
+                   artist: str | None = None,
+                   user_artist: str | None = None) -> dict:
     """
     Use Claude to correct misheard words in Whisper transcription.
 
@@ -63,6 +64,11 @@ def correct_lyrics(words: list[dict], title: str | None = None,
     Claude compares the transcription against its knowledge of the song's
     official lyrics and corrects words that were likely misheard, while
     preserving the exact same number of entries and all timestamps.
+
+    Args:
+        title: YouTube video title
+        artist: YouTube channel name
+        user_artist: Artist name provided by the user in the queue form (fallback)
 
     Returns dict with:
         "words": corrected word list (same structure, same length)
@@ -76,27 +82,30 @@ def correct_lyrics(words: list[dict], title: str | None = None,
     texts = [w["text"] for w in words]
     transcript = " ".join(texts)
 
-    # Build context
+    # Build context — YouTube title often contains song name + artist
     context_parts = []
     if title:
-        context_parts.append(f'"{title}"')
-    if artist:
-        context_parts.append(f"by {artist}")
-    context_line = f"Metadata: {' '.join(context_parts)}\n" if context_parts else ""
+        context_parts.append(f'YouTube video title: "{title}"')
+    if user_artist:
+        context_parts.append(f"Artist: {user_artist}")
+    context_line = "\n".join(context_parts) + "\n" if context_parts else ""
 
     prompt = (
-        f"You are a song lyrics transcription corrector. Your ONLY role is to faithfully "
-        f"reproduce the exact words sung in the song. Do not interpret, analyze, or add "
-        f"anything beyond what is actually sung.\n\n"
+        f"You are a song lyrics transcription corrector.\n\n"
+        f"STEP 1 — Identify the song:\n"
         f"{context_line}"
-        f"The following lyrics were transcribed from audio using speech recognition. "
-        f"Some words may be incorrect due to mishearing.\n\n"
+        f"Using the metadata above, identify the song and artist. "
+        f"The YouTube video title usually contains the song name and artist. "
+        f"If an Artist is explicitly provided, trust that. "
+        f"Then recall the actual official lyrics for this song from your knowledge.\n\n"
+        f"STEP 2 — Correct the transcription:\n"
+        f"The following lyrics were transcribed from the audio using speech recognition. "
+        f"Some words may be incorrect due to mishearing. Compare each word against "
+        f"the actual lyrics you recalled in Step 1 and correct any errors.\n\n"
         f"Transcription ({len(texts)} words):\n{transcript}\n\n"
-        f"Task: Compare against the song's known lyrics and correct any "
-        f"misheard words. Your response must have exactly two sections.\n\n"
+        f"Your response must have exactly two sections.\n\n"
         f"SECTION 1 — First line only:\n"
-        f"SONG: {{song title}} | ARTIST: {{artist/singer name}}\n"
-        f"(Based on your identification of the song. If unsure, use the metadata provided.)\n\n"
+        f"SONG: {{song title}} | ARTIST: {{artist/singer name}}\n\n"
         f"SECTION 2 — Corrected words:\n"
         f"EXACTLY {len(texts)} lines, one word per line, in the same order as the transcription.\n\n"
         f"Rules:\n"

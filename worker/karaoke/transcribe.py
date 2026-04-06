@@ -120,9 +120,30 @@ def _transcribe_whisper(audio_path: Path, device: str = "cpu",
                         language: str | None = None,
                         translate: bool = False) -> tuple[list[Segment], str]:
     """Transcribe using faster-whisper large-v3."""
+    import logging
+    _logger = logging.getLogger(__name__)
+
     # faster-whisper (CTranslate2) only supports cpu and cuda, not mps
     whisper_device = "cpu" if device == "mps" else device
-    model = WhisperModel("large-v3", device=whisper_device, compute_type="int8")
+    model = WhisperModel("large-v3-turbo", device=whisper_device, compute_type="int8")
+
+    # Detect language with a quick pass if not explicitly set
+    if not language and not translate:
+        _, det_info = model.transcribe(
+            str(audio_path), word_timestamps=False,
+            condition_on_previous_text=False,
+        )
+        # Consume the generator to get info
+        for _ in _: pass
+        if det_info.language_probability >= 0.5:
+            language = det_info.language
+            _logger.info("Detected language: %s (%.0f%% confidence)",
+                         language, det_info.language_probability * 100)
+        else:
+            language = "en"
+            _logger.info("Low confidence language detection (%.0f%% %s), defaulting to English",
+                         det_info.language_probability * 100, det_info.language)
+
     raw_segments, info = model.transcribe(
         str(audio_path),
         word_timestamps=True,
@@ -133,7 +154,7 @@ def _transcribe_whisper(audio_path: Path, device: str = "cpu",
         no_speech_threshold=0.6,
     )
 
-    detected_lang = info.language or "en"
+    detected_lang = language or info.language or "en"
 
     segments: list[Segment] = []
     for seg in raw_segments:

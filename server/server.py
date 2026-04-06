@@ -274,9 +274,10 @@ def _on_job_completed(job_id: str, data: dict) -> None:
             db.add(meta)
 
         meta.title = meta.title or (queue_item or {}).get("title")
-        # Artist priority: existing DB value > worker-identified artist (from progress callback) > channel name
+        # Artist priority: existing DB value > Claude-identified > user-provided > channel name
         worker_artist = (active_job or {}).get("artist")
-        meta.artist = meta.artist or worker_artist or (queue_item or {}).get("channel")
+        user_artist = (queue_item or {}).get("user_artist")
+        meta.artist = meta.artist or worker_artist or user_artist or (queue_item or {}).get("channel")
         meta.url = (queue_item or {}).get("url")
         meta.mode = data.get("mode") or (queue_item or {}).get("mode", "karaoke")
         meta.languages = json.dumps((queue_item or {}).get("languages", []))
@@ -507,6 +508,7 @@ async def worker_poll(request: Request):
         "r2_prefix": f"jobs/{job_id}",
         "title": next_item.get("title"),
         "channel": next_item.get("channel"),
+        "user_artist": next_item.get("user_artist"),
         "settings": {
             "feature_lyrics_correction": settings.get("feature_lyrics_correction", True),
             "feature_translation": settings.get("feature_translation", True),
@@ -1008,6 +1010,7 @@ def create_job(req: JobRequest, user: User | None = Depends(get_optional_user)):
         "mode": mode,
         "languages": languages,
         "title": req.title or req.url,
+        "user_artist": req.artist,
         "added_by": user.name.split()[0] if user and user.name else None,
         "added_by_id": str(user.id) if user else None,
         "status": "queued",
@@ -1038,6 +1041,7 @@ class QueueRequest(BaseModel):
     mode: str = "karaoke"
     languages: list[str] = []
     title: str | None = None
+    artist: str | None = None
 
 
 @app.post("/api/queue")
@@ -1052,8 +1056,6 @@ def add_to_queue(req: QueueRequest, user: User | None = Depends(get_optional_use
 
     max_langs = settings.get("max_subtitle_languages", 3)
     languages = req.languages[:max_langs] if req.languages else []
-    if mode not in ("subtitled", "both"):
-        languages = []
 
     # Enforce per-user limits (admins bypass)
     if user and not is_admin(user) and user.permissions:

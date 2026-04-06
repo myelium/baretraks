@@ -584,8 +584,8 @@ def _run_combined_pipeline(job_id: str, url: str, output_dir: Path,
 def _run_unified_pipeline(job_id: str, url: str, output_dir: Path,
                           languages: list[str], callback_url: str,
                           callback_key: str, settings: dict):
-    """Unified pipeline: download → separate → transcribe → translate.
-    No compose step — the player handles video + audio + subtitles separately."""
+    """Unified pipeline: download → separate → mux → transcribe → translate.
+    Video gets instrumental baked in; vocals synced separately in player."""
     device = DEVICE
     demucs_model = settings.get("demucs_model", DEMUCS_MODEL)
     work_dir = output_dir / "work"
@@ -612,23 +612,33 @@ def _run_unified_pipeline(job_id: str, url: str, output_dir: Path,
     audio_duration = _get_audio_duration(audio_path)
     _report_progress(callback_url, callback_key, job_id, audio_duration=audio_duration)
 
-    # Copy video to output dir for upload
-    video_output = output_dir / "video.mp4"
-    shutil.copy2(video_path, video_output)
-
     # Step 2: Separate
     if _check_cancel(): return None
     t0 = time.monotonic()
     _report_progress(callback_url, callback_key, job_id,
                      step=2, step_name="Separating vocals", step_progress=0.0)
+
+    def _sep_progress(pct):
+        _report_progress(callback_url, callback_key, job_id, step_progress=pct)
+
     instrumental_wav, vocals_wav = separate(audio_path, work_dir / "demucs",
-                                            device=device, model=demucs_model)
+                                            device=device, model=demucs_model,
+                                            progress_callback=_sep_progress)
     _convert_to_mp3(instrumental_wav, instrumental_mp3)
     _convert_to_mp3(vocals_wav, vocals_mp3)
     instrumental_wav.unlink(missing_ok=True)
     vocals_wav.unlink(missing_ok=True)
     step_durations["2"] = time.monotonic() - t0
     _report_progress(callback_url, callback_key, job_id, step_progress=1.0)
+
+    # Mux instrumental into video (fast — copies video stream, encodes audio)
+    video_output = output_dir / "video.mp4"
+    subprocess.run([
+        "ffmpeg", "-y", "-i", str(video_path), "-i", str(instrumental_mp3),
+        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+        "-map", "0:v:0", "-map", "1:a:0", "-shortest",
+        str(video_output),
+    ], capture_output=True)
 
     # Step 3: Transcribe
     if _check_cancel(): return None
@@ -654,7 +664,9 @@ def _run_unified_pipeline(job_id: str, url: str, output_dir: Path,
             with _lock:
                 title = _current_job.get("title") if _current_job else None
                 channel = _current_job.get("channel") if _current_job else None
-            correction = correct_lyrics(words_list, title=title, artist=channel)
+                user_artist = _current_job.get("user_artist") if _current_job else None
+            correction = correct_lyrics(words_list, title=title,
+                                        artist=channel, user_artist=user_artist)
             words_list = correction["words"]
             if correction.get("identified_artist"):
                 _report_progress(callback_url, callback_key, job_id,
@@ -737,6 +749,7 @@ def _execute_job(job: dict):
             "mode": mode,
             "title": job.get("title"),
             "channel": job.get("channel"),
+            "user_artist": job.get("user_artist"),
             "step": 0,
             "step_name": "Starting",
             "step_progress": 0.0,
@@ -808,12 +821,11 @@ def _execute_job(job: dict):
 
         # Collect files to upload
         upload_files = {}
-        for fname in ["video.mp4", "instrumental.mp3", "vocals.mp3", "lyrics.json"]:
+        for fname in ["video.mp4", "instrumental.mp3", "vocals.mp3"]:
             fpath = output_dir / fname
             if fpath.exists():
                 upload_files[fname] = fpath
-        for srt in output_dir.glob("subtitles_*.srt"):
-            upload_files[srt.name] = srt
+        # lyrics.json and subtitles_*.srt are stored in the DB, not R2
 
         # Request presigned upload URLs from the app
         r2_keys = []

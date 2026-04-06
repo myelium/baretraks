@@ -822,7 +822,7 @@
   }
   .karaoke-overlay {
     position: absolute;
-    bottom: 60px;
+    bottom: 20px;
     left: 0;
     width: 100%;
     text-align: center;
@@ -830,10 +830,11 @@
     z-index: 10;
     padding: 0 20px;
     line-height: 1.6;
+    --k-font-size: 3.5vh;
   }
   .karaoke-overlay .k-word {
     font-weight: 700;
-    font-size: clamp(18px, 4vh, 36px);
+    font-size: clamp(14px, var(--k-font-size), 48px);
     color: #808080;
     -webkit-text-stroke: 1px #000;
     text-shadow: 0 0 4px #000, 0 0 8px #000, 2px 2px 3px rgba(0,0,0,0.8);
@@ -853,11 +854,19 @@
     padding: 4px 16px;
   }
   .video-container:fullscreen .karaoke-overlay {
-    bottom: 80px;
+    bottom: 40px;
   }
-  .video-container:fullscreen .karaoke-overlay .k-word {
-    font-size: clamp(24px, 5vh, 48px);
+  .k-font-btn {
+    padding: 2px 8px;
+    border-radius: 4px;
+    border: 1px solid rgba(74,63,47,0.6);
+    background: rgba(26,22,18,0.85);
+    color: #d4c8b0;
+    font-family: Arial, sans-serif;
+    cursor: pointer;
+    line-height: 1;
   }
+  .k-font-btn:hover { background: rgba(74,63,47,0.5); }
   .subtitle-controls {
     position: absolute;
     bottom: 8px;
@@ -2536,6 +2545,7 @@
       </div>
       <div class="player-comments-divider" onclick="togglePlayerComments()" title="Toggle Lyrics"></div>
       <div class="player-comments-side" id="player-comments-side">
+        <div id="player-title-info" style="padding:8px 12px 4px;"></div>
         <div class="lyrics-tabs" id="lyrics-tabs" style="display:none;">
           <button class="lyrics-tab active" id="tab-live-lyrics" onclick="switchLyricsTab('live')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg> Live Lyrics</button>
           <button class="lyrics-tab" id="tab-btl" onclick="switchLyricsTab('btl')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg> Between the Lines</button>
@@ -2617,15 +2627,38 @@
 </div>
 
 <script>
-const STEP_NAMES_KARAOKE = ['Downloading', 'Separating vocals', 'Transcribing lyrics', 'Building subtitles', 'Composing video'];
-const STEP_NAMES_SUBTITLED = ['Downloading audio', 'Transcribing', 'Translating'];
-const STEP_NAMES_BOTH = ['Downloading', 'Separating vocals', 'Transcribing lyrics', 'Building subtitles', 'Composing video', 'Translating'];
-let STEP_NAMES = STEP_NAMES_KARAOKE;
+const STEP_NAMES_UNIFIED = ['Downloading', 'Separating vocals', 'Transcribing lyrics', 'Translating'];
+let STEP_NAMES = STEP_NAMES_UNIFIED;
 
 function getStepNamesForMode(mode) {
-  if (mode === 'subtitled') return STEP_NAMES_SUBTITLED;
-  if (mode === 'both') return STEP_NAMES_BOTH;
-  return STEP_NAMES_KARAOKE;
+  return STEP_NAMES_UNIFIED;
+}
+function getEffectiveStepCount(item) {
+  const hasLangs = item && item.languages && item.languages.length > 0;
+  return hasLangs ? 4 : 3;
+}
+
+// Weighted progress: each step's share of total time (approximate)
+// Without translation: Download 10%, Separate 70%, Transcribe 20%
+// With translation:    Download 8%, Separate 57%, Transcribe 17%, Translate 18%
+const _STEP_WEIGHTS_3 = [0.10, 0.70, 0.20];
+const _STEP_WEIGHTS_4 = [0.08, 0.57, 0.17, 0.18];
+
+function getWeightedProgress(item) {
+  const stepNum = item.step || 0;
+  const stepProg = item.step_progress || 0;
+  if (stepNum <= 0) return 0;
+  const hasLangs = item.languages && item.languages.length > 0;
+  const weights = hasLangs ? _STEP_WEIGHTS_4 : _STEP_WEIGHTS_3;
+  // Sum weights of completed steps + current step's partial weight
+  let pct = 0;
+  for (let i = 0; i < stepNum - 1 && i < weights.length; i++) {
+    pct += weights[i];
+  }
+  if (stepNum - 1 < weights.length) {
+    pct += weights[stepNum - 1] * stepProg;
+  }
+  return Math.max(0, Math.min(100, Math.round(pct * 100)));
 }
 let pollInterval = null;
 let currentJob = null;       // active queue job (from polling)
@@ -2920,14 +2953,7 @@ function openQueueForm() {
       <input type="text" id="queue-form-title" placeholder="Song title" style="width:100%;padding:6px 8px;margin-bottom:8px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:0.85rem;box-sizing:border-box;" />
       <label style="font-size:0.78rem;color:var(--text-dim);display:block;margin-bottom:3px;">Artist (optional)</label>
       <input type="text" id="queue-form-artist" placeholder="Artist name" style="width:100%;padding:6px 8px;margin-bottom:10px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:0.85rem;box-sizing:border-box;" />
-      <label style="font-size:0.78rem;color:var(--text-dim);display:block;margin-bottom:3px;">Type</label>
-      <div style="display:flex;gap:8px;margin-bottom:8px;">
-        <label style="font-size:0.8rem;color:var(--text);cursor:pointer;display:flex;align-items:center;gap:4px;">
-          <input type="checkbox" id="queue-form-karaoke" checked onchange="updateQueueFormMode()"> Karaoke</label>
-        <label style="font-size:0.8rem;color:var(--text);cursor:pointer;display:flex;align-items:center;gap:4px;">
-          <input type="checkbox" id="queue-form-subtitles" onchange="updateQueueFormMode()"> Subtitles</label>
-      </div>
-      <div id="queue-form-lang-section" style="display:none;margin-bottom:8px;">
+      <div id="queue-form-lang-section" style="margin-bottom:8px;">
         <label style="font-size:0.78rem;color:var(--text-dim);display:block;margin-bottom:3px;">Subtitle Languages</label>
         <div id="queue-form-lang-tags" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px;"></div>
         <select id="queue-form-lang-select" onchange="addQueueFormLang(this.value); this.value='';"
@@ -2942,11 +2968,6 @@ function openQueueForm() {
       </div>
     </div>`;
   document.body.appendChild(overlay);
-}
-
-function updateQueueFormMode() {
-  const hasSubs = document.getElementById('queue-form-subtitles').checked;
-  document.getElementById('queue-form-lang-section').style.display = hasSubs ? '' : 'none';
 }
 
 function addQueueFormLang(code) {
@@ -2972,21 +2993,17 @@ function renderQueueFormLangTags() {
 }
 
 async function submitQueueForm(url) {
-  const wantKaraoke = document.getElementById('queue-form-karaoke').checked;
-  const wantSubs = document.getElementById('queue-form-subtitles').checked;
-  if (!wantKaraoke && !wantSubs) { showAlert('Select Karaoke and/or Subtitles.'); return; }
-  if (wantSubs && _queueFormLangs.length === 0) { showAlert('Add at least one subtitle language.'); return; }
-
-  const mode = (wantKaraoke && wantSubs) ? 'both' : (wantSubs ? 'subtitled' : 'karaoke');
-  const languages = wantSubs ? _queueFormLangs : [];
+  const languages = _queueFormLangs;
   const title = document.getElementById('queue-form-title').value.trim() || null;
+  const artist = document.getElementById('queue-form-artist').value.trim() || null;
 
   const btn = document.getElementById('btn-submit');
   btn.disabled = true;
   btn.classList.add('loading');
 
   try {
-    const body = { url, mode, title };
+    const body = { url, mode: 'karaoke', title };
+    if (artist) body.artist = artist;
     if (languages.length > 0) body.languages = languages;
     const resp = await fetch('/api/queue', {
       method: 'POST',
@@ -3083,13 +3100,13 @@ function renderQueue() {
     const isPauseNow = processingItem.pause_requested || false;
     if (existingEl && existingEl.classList.contains('processing') && list.children.length === productionQueue.length && wasPauseRequested === isPauseNow) {
       // Update just the dynamic parts in-place
-      const totalSteps = getStepNamesForMode(processingItem.mode).length;
+      const totalSteps = getEffectiveStepCount(processingItem);
       const stepNum = processingItem.step || 0;
       const stepProg = processingItem.step_progress || 0;
-      const overallPct = totalSteps > 0 ? Math.max(0, Math.round(((stepNum - 1 + stepProg) / totalSteps) * 100)) : 0;
+      const overallPct = getWeightedProgress(processingItem);
       const barPct = overallPct;
       const langSuffix = processingItem.languages?.length ? ' · ' + processingItem.languages.map(c => LANG_NAMES_ALL[c] || c).join(', ') : '';
-      const modeLabel = processingItem.mode === 'both' ? 'Karaoke + Subtitles' + langSuffix : (processingItem.mode === 'subtitled' ? 'Subtitles' + langSuffix : 'Karaoke');
+      const modeLabel = 'Producing' + langSuffix;
       const statusLine = stepNum > 0 ? `${stepNum}/${totalSteps} ${processingItem.step_name}` : processingItem.step_name || modeLabel;
 
       const pieEl = existingEl.querySelector('.queue-pie');
@@ -3111,13 +3128,11 @@ function renderQueue() {
     const wasRetry = item.was_failed;
 
     const langSuffix = item.languages?.length ? ' · ' + item.languages.map(c => LANG_NAMES_ALL[c] || c).join(', ') : '';
-    const modeLabel = item.mode === 'both'
-      ? 'Karaoke + Subtitles' + langSuffix
-      : (item.mode === 'subtitled' ? 'Subtitles' + langSuffix : 'Karaoke');
+    const modeLabel = 'Queued' + langSuffix;
 
     let statusLine = modeLabel;
     if (isProcessing && item.step_name) {
-      const totalSteps = getStepNamesForMode(item.mode).length;
+      const totalSteps = getEffectiveStepCount(item);
       const stepNum = item.step || 0;
       statusLine = stepNum > 0 ? `${stepNum}/${totalSteps} ${item.step_name}` : item.step_name;
     }
@@ -3125,10 +3140,10 @@ function renderQueue() {
 
     let icon = '';
     if (isProcessing) {
-      const totalSteps = getStepNamesForMode(item.mode).length;
+      const totalSteps = getEffectiveStepCount(item);
       const stepNum = item.step || 0;
       const stepProg = item.step_progress || 0;
-      const overallPct = totalSteps > 0 ? Math.max(0, Math.round(((stepNum - 1 + stepProg) / totalSteps) * 100)) : 0;
+      const overallPct = getWeightedProgress(item);
       icon = `<div class="queue-pie" style="--pct:${Math.max(overallPct, 2)}%"><span class="queue-pie-pct">${overallPct}%</span></div>`;
     } else if (isPaused) {
       icon = '&#9646;&#9646;';
@@ -3144,7 +3159,7 @@ function renderQueue() {
 
     let progressBar = '';
     if (isProcessing) {
-      const totalSteps = getStepNamesForMode(item.mode).length;
+      const totalSteps = getEffectiveStepCount(item);
       const stepNum = item.step || 0;
       const stepProg = item.step_progress || 0;
       const barPct = totalSteps > 0 ? Math.max(0, Math.round(((stepNum - 1 + stepProg) / totalSteps) * 100)) : 0;
@@ -3973,9 +3988,9 @@ function _renderPlayerTitleInfo(jobId) {
   const year = item?.year || _playerItem?.year || '';
   const editLink = currentUser ? `<a style="font-size:0.65rem;color:var(--text-muted);cursor:pointer;opacity:0.6;margin-left:4px;" onclick="event.stopPropagation(); openEditMetadata('${jobId}')">edit</a>` : '';
   const artistYear = [artist, year ? `(${year})` : ''].filter(Boolean).join(' ');
-  const line2 = artistYear ? `<div style="font-size:0.72rem;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(artistYear)}${editLink}</div>` : (editLink ? `<div style="font-size:0.72rem;">${editLink}</div>` : '');
-  return `<div id="player-title-info" style="flex:1;min-width:0;padding:0 10px;">
-    <div style="font-size:0.82rem;color:var(--text-bright);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(title)}</div>
+  const line2 = artistYear ? `<div style="font-size:0.85rem;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(artistYear)}${editLink}</div>` : (editLink ? `<div style="font-size:0.85rem;">${editLink}</div>` : '');
+  return `<div style="min-width:0;">
+    <div style="font-size:1.05rem;color:var(--text-bright);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;">${escapeHtml(title)}</div>
     ${line2}
   </div>`;
 }
@@ -4135,9 +4150,24 @@ function switchTab(tab, jobId) {
     _currentPlayerTab = 'video';
     const item = libraryItems.find(i => i.id === id) || _playerItem || {};
     const isLegacy = !item.format_version || item.format_version < 2;
+    const langs = item.languages || _playerItem?.languages || [];
+    const detectedLang = item.language || _playerItem?.language || 'en';
+    const detectedLangName = LANG_NAMES_ALL[detectedLang] || LANG_NAMES_ALL[detectedLang.split('-')[0]] || detectedLang;
+    _overlayOriginalLangName = detectedLangName;
+    const langOpts = langs.map(l =>
+      `<option value="${l}">${LANG_NAMES_ALL[l] || l}</option>`
+    ).join('');
+    const langSelect = `<select id="overlay-lang-select" onchange="selectOverlayLang('${id}', this.value)" style="padding:3px 8px;border-radius:6px;border:1px solid rgba(74,63,47,0.6);background:rgba(26,22,18,0.85);color:#d4c8b0;font-size:0.78rem;font-family:inherit;cursor:pointer;">
+           <option value="">${escapeHtml(detectedLangName)}</option>
+           ${langOpts}
+           <option value="__off__">No Subtitles</option>
+         </select>`;
+    _overlayLangs = langs;
+    _overlayLangIdx = -1; // -1 = original (karaoke mode)
+    _overlayJobId = id;
     area.innerHTML = `
       <div class="video-container" id="karaoke-video-container">
-        <video id="media-el" controls preload="auto" src="/api/jobs/${id}/video" autoplay ${isLegacy ? '' : 'muted'}></video>
+        <video id="media-el" controls preload="auto" src="/api/jobs/${id}/video" autoplay></video>
         <div class="karaoke-overlay" id="karaoke-overlay"></div>
       </div>
       <div class="tab-download">
@@ -4149,15 +4179,12 @@ function switchTab(tab, jobId) {
             </svg>
             <input type="range" id="vocal-volume-slider" class="vocal-volume-slider" min="0" max="100" value="100" oninput="setVocalsVolume(this.value)">
           </div>
-          <label class="toggle-label" style="display:flex;align-items:center;gap:4px;cursor:pointer" title="Toggle karaoke subtitles">
-            <input type="checkbox" id="karaoke-sub-toggle" ${_karaokeOverlayOn ? 'checked' : ''} onchange="toggleKaraokeOverlay(this.checked)" style="accent-color:#ffd700">
-            Lyrics
-          </label>
+          ${langSelect}
+          <span style="display:inline-flex;gap:1px;align-items:baseline;"><button class="k-font-btn" onclick="adjustKaraokeFont(-0.5)" title="Smaller subtitles" style="font-size:0.5rem;padding:2px 5px;">A</button><button class="k-font-btn" onclick="adjustKaraokeFont(0.5)" title="Larger subtitles" style="font-size:0.95rem;font-weight:700;padding:2px 6px;">A</button></span>
           <button class="karaoke-fullscreen-btn-inline" onclick="toggleKaraokeFullscreen()" title="Fullscreen">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
           </button>
         </div>
-        ${_renderPlayerTitleInfo(id)}
         <div class="tab-download-right">
           <span class="vote-controls" data-vote-id="${id}">${renderVoteControls(id, _getVoteData(id, 'up'), _getVoteData(id, 'down'), _getVoteData(id, 'user'))}</span>
           ${shareBtn}
@@ -4183,10 +4210,7 @@ function switchTab(tab, jobId) {
 
   // Pre-load audio tracks and auto-enable once video actually starts playing
   if (tab === 'video') {
-    const _item = libraryItems.find(i => i.id === id) || _playerItem || {};
-    const _isLegacy = !_item.format_version || _item.format_version < 2;
     preloadVocalsAudio(id);
-    if (!_isLegacy) preloadInstrumentalAudio(id);
     buildKaraokeLines();
     // We can't call .play() on Audio elements until the user interacts.
     // The video element has autoplay, but that doesn't grant play permission
@@ -4194,10 +4218,6 @@ function switchTab(tab, jobId) {
     // event — by that point the browser has granted audio context permission.
     const startAudioOnce = () => {
       activeMediaEl.removeEventListener('playing', startAudioOnce);
-      if (instrumentalAudioEl) {
-        instrumentalAudioEl.volume = 1.0;
-        _playInstrumental();
-      }
       if (vocalsAudioEl) {
         vocalsAudioEl.volume = _vocalsVolume;
         vocalsOn = true;
@@ -4209,6 +4229,12 @@ function switchTab(tab, jobId) {
   }
 
   renderLyrics();
+
+  // Render title info above lyrics
+  const titleInfoEl = document.getElementById('player-title-info');
+  if (titleInfoEl) {
+    titleInfoEl.innerHTML = _renderPlayerTitleInfo(id);
+  }
 
   // Show lyrics tabs if we have lyrics
   const lyricsTabs = document.getElementById('lyrics-tabs');
@@ -4322,7 +4348,8 @@ function destroyInstrumentalSync() {
 
 function _playInstrumental() {
   if (!instrumentalAudioEl || !activeMediaEl) return;
-  instrumentalAudioEl.currentTime = activeMediaEl.currentTime;
+  const drift = Math.abs(instrumentalAudioEl.currentTime - activeMediaEl.currentTime);
+  if (drift > 0.3) instrumentalAudioEl.currentTime = activeMediaEl.currentTime;
   instrumentalAudioEl.play().then(() => {
     if (activeMediaEl && activeMediaEl.paused) instrumentalAudioEl.pause();
   }).catch(() => {});
@@ -4377,8 +4404,8 @@ function updateKaraokeOverlay(t) {
     const pct = Math.round(progress * 100);
     if (t >= w.end) {
       html += `<span class="k-word sung">${w.text} </span>`;
-    } else if (t >= w.start) {
-      html += `<span class="k-word" style="background:linear-gradient(90deg, #FFD700 ${pct}%, #808080 ${pct}%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">${w.text} </span>`;
+    } else if (t >= w.start && pct > 5) {
+      html += `<span class="k-word" style="background:linear-gradient(90deg, #FFD700 ${pct}%, #808080 ${pct}%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;-webkit-text-stroke:0;">${w.text} </span>`;
     } else {
       html += `<span class="k-word">${w.text} </span>`;
     }
@@ -4387,11 +4414,67 @@ function updateKaraokeOverlay(t) {
   overlay.innerHTML = html;
 }
 
+let _karaokeFontSize = 3.5; // vh units
+
+function adjustKaraokeFont(delta) {
+  _karaokeFontSize = Math.max(1.5, Math.min(8, _karaokeFontSize + delta));
+  const overlay = document.getElementById('karaoke-overlay');
+  if (overlay) overlay.style.setProperty('--k-font-size', _karaokeFontSize + 'vh');
+}
+
 function toggleKaraokeOverlay(on) {
   _karaokeOverlayOn = on;
   if (!on) {
     const overlay = document.getElementById('karaoke-overlay');
     if (overlay) overlay.innerHTML = '';
+  }
+}
+
+// --- Overlay language cycling ---
+let _overlayLangs = [];
+let _overlayLangIdx = -1; // -1 = original karaoke, 0+ = translated
+let _overlayJobId = null;
+let _overlayMode = 'karaoke'; // 'karaoke' or 'translated'
+let _translatedCues = [];
+let _overlayOriginalLangName = 'Original';
+
+function selectOverlayLang(jobId, langCode) {
+  if (langCode === '__off__') {
+    _karaokeOverlayOn = false;
+    _overlayMode = 'karaoke';
+    _translatedCues = [];
+    const overlay = document.getElementById('karaoke-overlay');
+    if (overlay) overlay.innerHTML = '';
+    return;
+  }
+  _karaokeOverlayOn = true;
+  if (!langCode) {
+    // Original language — karaoke mode
+    _overlayMode = 'karaoke';
+    _translatedCues = [];
+    return;
+  }
+  _overlayMode = 'translated';
+  fetch(`/api/jobs/${jobId}/subtitles/${langCode}`)
+    .then(r => r.text())
+    .then(text => { _translatedCues = parseSRT(text); })
+    .catch(() => { _translatedCues = []; });
+}
+
+function _updateTranslatedOverlay(t) {
+  const overlay = document.getElementById('karaoke-overlay');
+  if (!overlay || !_karaokeOverlayOn) { if (overlay) overlay.innerHTML = ''; return; }
+  let activeText = '';
+  for (const cue of _translatedCues) {
+    if (t >= cue.start && t <= cue.end) {
+      activeText = cue.text;
+      break;
+    }
+  }
+  if (activeText) {
+    overlay.innerHTML = `<span class="k-line-bg"><span class="k-word sung">${activeText}</span></span>`;
+  } else {
+    overlay.innerHTML = '';
   }
 }
 
@@ -4405,13 +4488,11 @@ function _playVocals() {
 }
 
 function onMediaPlay() {
-  if (instrumentalAudioEl) _playInstrumental();
   if (vocalsAudioEl && vocalsOn) _playVocals();
   _startLyricsRaf();
 }
 
 function onMediaPause() {
-  if (instrumentalAudioEl) instrumentalAudioEl.pause();
   if (vocalsAudioEl) {
     vocalsAudioEl.pause();
     vocalsAudioEl.removeAttribute('autoplay');
@@ -4421,17 +4502,15 @@ function onMediaPause() {
   if (activeMediaEl) updateLyricsHighlight(activeMediaEl.currentTime);
 }
 
-// Failsafe: periodically check if audio is out of sync with video pause state
+// Failsafe: periodically check if vocals are out of sync with video pause state
 setInterval(() => {
-  if (!activeMediaEl) return;
-  if (activeMediaEl.paused) {
-    if (instrumentalAudioEl && !instrumentalAudioEl.paused) instrumentalAudioEl.pause();
-    if (vocalsAudioEl && vocalsOn && !vocalsAudioEl.paused) vocalsAudioEl.pause();
+  if (!vocalsAudioEl || !activeMediaEl || !vocalsOn) return;
+  if (activeMediaEl.paused && !vocalsAudioEl.paused) {
+    vocalsAudioEl.pause();
   }
 }, 500);
 
 function onMediaSeeked() {
-  if (instrumentalAudioEl && !activeMediaEl.paused) _playInstrumental();
   if (vocalsAudioEl && vocalsOn && !activeMediaEl.paused) {
     _playVocals();
   }
@@ -4563,7 +4642,11 @@ function _lyricsRafLoop() {
   if (!activeMediaEl) { _lyricsRafId = null; return; }
   const t = activeMediaEl.currentTime;
   updateLyricsHighlight(t);
-  updateKaraokeOverlay(t);
+  if (_overlayMode === 'translated' && _translatedCues.length > 0) {
+    _updateTranslatedOverlay(t);
+  } else {
+    updateKaraokeOverlay(t);
+  }
   _lyricsRafId = requestAnimationFrame(_lyricsRafLoop);
 }
 
@@ -4576,25 +4659,14 @@ function _stopLyricsRaf() {
 }
 
 function onTimeUpdate() {
-  // Drift correction for audio sync — check every 2s
-  if (!activeMediaEl.paused) {
+  // Drift correction for vocals sync — check every 2s
+  if (vocalsAudioEl && vocalsOn && !activeMediaEl.paused) {
     const now = performance.now();
     if (now - _lastDriftCorrection > 2000) {
-      const videoTime = activeMediaEl.currentTime;
-      // Instrumental drift correction
-      if (instrumentalAudioEl) {
-        const iDrift = instrumentalAudioEl.currentTime - videoTime;
-        if (Math.abs(iDrift) > VOCALS_DRIFT_THRESHOLD) {
-          instrumentalAudioEl.currentTime = videoTime;
-        }
-      }
-      // Vocals drift correction
-      if (vocalsAudioEl && vocalsOn) {
-        const expected = videoTime + VOCALS_OFFSET;
-        const drift = vocalsAudioEl.currentTime - expected;
-        if (Math.abs(drift) > VOCALS_DRIFT_THRESHOLD) {
-          vocalsAudioEl.currentTime = expected;
-        }
+      const expected = activeMediaEl.currentTime + VOCALS_OFFSET;
+      const drift = vocalsAudioEl.currentTime - expected;
+      if (Math.abs(drift) > VOCALS_DRIFT_THRESHOLD) {
+        vocalsAudioEl.currentTime = expected;
       }
       _lastDriftCorrection = now;
     }
@@ -4646,19 +4718,7 @@ function renderLibraryFilterBar() {
   const bar = document.getElementById('library-filter-bar');
 
   // Collect type facets — 'both' counts under both Karaoke and Subtitled
-  const typeCounts = {};
-  for (const item of libraryItems) {
-    const m = item.mode || 'karaoke';
-    if (m === 'both') {
-      typeCounts['Karaoke'] = (typeCounts['Karaoke'] || 0) + 1;
-      typeCounts['Subtitled'] = (typeCounts['Subtitled'] || 0) + 1;
-    } else {
-      const type = m === 'subtitled' ? 'Subtitled' : 'Karaoke';
-      typeCounts[type] = (typeCounts[type] || 0) + 1;
-    }
-  }
-
-  const types = Object.keys(typeCounts).sort();
+  const types = [];
 
   // Type tabs in header row
   const tabsEl = document.getElementById('library-header-tabs');
@@ -4766,16 +4826,7 @@ function renderLibraryGrid() {
       const cats = item.categories || [];
       if (!cats.some(c => libraryFilters.categories.has(c))) return false;
     }
-    // Type filter — 'both' matches either Karaoke or Subtitled
-    if (libraryFilters.types.size > 0) {
-      const m = item.mode || 'karaoke';
-      if (m === 'both') {
-        if (!libraryFilters.types.has('Karaoke') && !libraryFilters.types.has('Subtitled')) return false;
-      } else {
-        const type = m === 'subtitled' ? 'Subtitled' : 'Karaoke';
-        if (!libraryFilters.types.has(type)) return false;
-      }
-    }
+    // Type filter removed — unified mode
     // Language filter — match source language OR subtitle languages
     if (libraryFilters.language) {
       const lang = libraryFilters.language;
@@ -4825,14 +4876,10 @@ function renderLibraryGrid() {
     const thumb = item.thumbnail
       ? `<img class="library-thumb" src="${item.thumbnail}" alt="" loading="lazy" />`
       : `<div class="library-thumb" style="display:flex;align-items:center;justify-content:center;color:#4a3f2f;font-size:2rem;">&#9835;</div>`;
-    const mode = item.mode || 'karaoke';
-    const badgeClass = mode === 'both' ? 'both' : (mode === 'subtitled' ? 'subtitled' : 'karaoke');
-    const badgeText = mode === 'both' ? '<span style="color:#d4a84b">Karaoke</span> + Subtitles' : (mode === 'subtitled' ? 'Subtitles' : 'Karaoke');
     return `
       <div class="library-item" onclick="showPlayerForJob('${item.id}')">
         <div class="library-item-header">
           ${thumb}
-          <span class="library-mode-badge ${badgeClass}">${badgeText}</span>
           ${userCan('can_delete_library') ? `<button class="library-delete-btn" onclick="event.stopPropagation(); deleteJob('${item.id}')" title="Delete">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
           </button>` : ''}
@@ -5031,23 +5078,6 @@ function userCan(perm) {
 }
 
 function applyAppSettings() {
-  // Hide/show mode checkboxes based on allowed_modes
-  const modes = appSettings.allowed_modes || [];
-  const karaokeLabel = document.getElementById('mode-karaoke')?.closest('label');
-  const subtitledLabel = document.getElementById('mode-subtitled')?.closest('label');
-  if (karaokeLabel) karaokeLabel.style.display = modes.includes('karaoke') || modes.includes('both') ? '' : 'none';
-  if (subtitledLabel) subtitledLabel.style.display = modes.includes('subtitled') || modes.includes('both') ? '' : 'none';
-
-  // If current mode selection is no longer allowed, reset
-  const k = document.getElementById('mode-karaoke');
-  const s = document.getElementById('mode-subtitled');
-  if (k && !modes.includes('karaoke') && !modes.includes('both')) k.checked = false;
-  if (s && !modes.includes('subtitled') && !modes.includes('both')) s.checked = false;
-  // Ensure at least one mode is selected
-  if (k && s && !k.checked && !s.checked) {
-    if (modes.includes('karaoke') || modes.includes('both')) k.checked = true;
-    else if (modes.includes('subtitled')) s.checked = true;
-  }
   if (typeof onModeChange === 'function') onModeChange();
 }
 
@@ -6049,21 +6079,6 @@ async function loadAdminSettings() {
         </div>
 
         <label style="color:var(--text-bright);font-size:0.85rem;font-weight:600;display:block;margin-bottom:8px;">
-          Allowed Production Modes
-        </label>
-        <div style="display:flex;gap:12px;margin-bottom:16px;">
-          <label style="font-size:0.8rem;color:var(--text-dim);display:flex;align-items:center;gap:6px;">
-            <input type="checkbox" id="set-mode-karaoke" ${s.allowed_modes?.includes('karaoke') ? 'checked' : ''} style="accent-color:var(--accent);" /> Karaoke
-          </label>
-          <label style="font-size:0.8rem;color:var(--text-dim);display:flex;align-items:center;gap:6px;">
-            <input type="checkbox" id="set-mode-subtitled" ${s.allowed_modes?.includes('subtitled') ? 'checked' : ''} style="accent-color:var(--accent);" /> Subtitled
-          </label>
-          <label style="font-size:0.8rem;color:var(--text-dim);display:flex;align-items:center;gap:6px;">
-            <input type="checkbox" id="set-mode-both" ${s.allowed_modes?.includes('both') ? 'checked' : ''} style="accent-color:var(--accent);" /> Both
-          </label>
-        </div>
-
-        <label style="color:var(--text-bright);font-size:0.85rem;font-weight:600;display:block;margin-bottom:8px;">
           Platform Limits
         </label>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;">
@@ -6119,11 +6134,6 @@ async function loadAdminSettings() {
 
 async function saveAdminSettings() {
   const status = document.getElementById('admin-settings-status');
-  const modes = [];
-  if (document.getElementById('set-mode-karaoke').checked) modes.push('karaoke');
-  if (document.getElementById('set-mode-subtitled').checked) modes.push('subtitled');
-  if (document.getElementById('set-mode-both').checked) modes.push('both');
-
   const body = {
     default_max_karaoke_per_day: parseInt(document.getElementById('set-max-karaoke').value) || 5,
     default_max_subtitled_per_day: parseInt(document.getElementById('set-max-subtitled').value) || 15,
@@ -6139,7 +6149,6 @@ async function saveAdminSettings() {
     feature_analysis: document.getElementById('set-feat-analysis').checked,
     feature_translation: document.getElementById('set-feat-translation').checked,
     feature_wishlist: document.getElementById('set-feat-wishlist').checked,
-    allowed_modes: modes,
     max_disk_space_mb: parseInt(document.getElementById('set-max-disk').value) || 0,
     demucs_model: document.getElementById('set-demucs-model').value,
     max_subtitle_languages: parseInt(document.getElementById('set-max-sub-langs').value) || 3,
