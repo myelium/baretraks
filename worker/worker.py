@@ -585,7 +585,8 @@ def _run_unified_pipeline(job_id: str, url: str, output_dir: Path,
                           languages: list[str], callback_url: str,
                           callback_key: str, settings: dict):
     """Unified pipeline: download → separate → mux → transcribe → translate.
-    Video gets instrumental baked in; vocals synced separately in player."""
+    Video gets instrumental baked in; vocals synced separately in player.
+    Supports resumption — skips steps whose output files already exist."""
     device = DEVICE
     demucs_model = settings.get("demucs_model", DEMUCS_MODEL)
     work_dir = output_dir / "work"
@@ -597,39 +598,49 @@ def _run_unified_pipeline(job_id: str, url: str, output_dir: Path,
     vocals_mp3 = output_dir / "vocals.mp3"
     step_durations = {}
 
-    # Step 1: Download
-    t0 = time.monotonic()
-    _report_progress(callback_url, callback_key, job_id,
-                     step=1, step_name="Downloading", step_progress=0.0)
+    # Step 1: Download (skip if files exist from previous run)
+    if video_path.exists() and audio_path.exists():
+        logger.info("[%s] Resuming — download already complete", job_id[:20])
+        _report_progress(callback_url, callback_key, job_id,
+                         step=1, step_name="Downloading (cached)", step_progress=1.0)
+    else:
+        t0 = time.monotonic()
+        _report_progress(callback_url, callback_key, job_id,
+                         step=1, step_name="Downloading", step_progress=0.0)
 
-    def _dl_progress(pct):
-        _report_progress(callback_url, callback_key, job_id, step_progress=pct)
+        def _dl_progress(pct):
+            _report_progress(callback_url, callback_key, job_id, step_progress=pct)
 
-    video_path, audio_path = download(url, work_dir, progress_callback=_dl_progress)
-    step_durations["1"] = time.monotonic() - t0
-    _report_progress(callback_url, callback_key, job_id, step_progress=1.0)
+        video_path, audio_path = download(url, work_dir, progress_callback=_dl_progress)
+        step_durations["1"] = time.monotonic() - t0
+        _report_progress(callback_url, callback_key, job_id, step_progress=1.0)
 
     audio_duration = _get_audio_duration(audio_path)
     _report_progress(callback_url, callback_key, job_id, audio_duration=audio_duration)
 
-    # Step 2: Separate
+    # Step 2: Separate (skip if outputs exist)
     if _check_cancel(): return None
-    t0 = time.monotonic()
-    _report_progress(callback_url, callback_key, job_id,
-                     step=2, step_name="Separating vocals", step_progress=0.0)
+    if instrumental_mp3.exists() and vocals_mp3.exists():
+        logger.info("[%s] Resuming — separation already complete", job_id[:20])
+        _report_progress(callback_url, callback_key, job_id,
+                         step=2, step_name="Separating vocals (cached)", step_progress=1.0)
+    else:
+        t0 = time.monotonic()
+        _report_progress(callback_url, callback_key, job_id,
+                         step=2, step_name="Separating vocals", step_progress=0.0)
 
-    def _sep_progress(pct):
-        _report_progress(callback_url, callback_key, job_id, step_progress=pct)
+        def _sep_progress(pct):
+            _report_progress(callback_url, callback_key, job_id, step_progress=pct)
 
-    instrumental_wav, vocals_wav = separate(audio_path, work_dir / "demucs",
-                                            device=device, model=demucs_model,
-                                            progress_callback=_sep_progress)
-    _convert_to_mp3(instrumental_wav, instrumental_mp3)
-    _convert_to_mp3(vocals_wav, vocals_mp3)
-    instrumental_wav.unlink(missing_ok=True)
-    vocals_wav.unlink(missing_ok=True)
-    step_durations["2"] = time.monotonic() - t0
-    _report_progress(callback_url, callback_key, job_id, step_progress=1.0)
+        instrumental_wav, vocals_wav = separate(audio_path, work_dir / "demucs",
+                                                device=device, model=demucs_model,
+                                                progress_callback=_sep_progress)
+        _convert_to_mp3(instrumental_wav, instrumental_mp3)
+        _convert_to_mp3(vocals_wav, vocals_mp3)
+        instrumental_wav.unlink(missing_ok=True)
+        vocals_wav.unlink(missing_ok=True)
+        step_durations["2"] = time.monotonic() - t0
+        _report_progress(callback_url, callback_key, job_id, step_progress=1.0)
 
     # Mux instrumental into video (fast — copies video stream, encodes audio)
     video_output = output_dir / "video.mp4"
@@ -667,12 +678,36 @@ def _run_unified_pipeline(job_id: str, url: str, output_dir: Path,
                 user_artist = _current_job.get("user_artist") if _current_job else None
             correction = correct_lyrics(words_list, title=title,
                                         artist=channel, user_artist=user_artist)
+
+            # If Claude identified a different language than Whisper used,
+            # re-transcribe with the correct language forced
+            claude_lang = correction.get("identified_language")
+            if claude_lang and claude_lang != detected_lang:
+                logger.info("[%s] Language mismatch: Whisper=%s, Claude=%s — re-transcribing",
+                            job_id[:20], detected_lang, claude_lang)
+                _report_progress(callback_url, callback_key, job_id,
+                                 step_name=f"Re-transcribing ({claude_lang})", step_progress=0.85)
+                transcribe_path2 = vocals_mp3 if vocals_mp3.exists() else audio_path
+                segments, detected_lang = transcribe(transcribe_path2, device=device,
+                                                     language=claude_lang)
+                words_list = []
+                for seg in segments:
+                    for w in seg.words:
+                        words_list.append({"text": w.text, "start": w.start, "end": w.end})
+                _report_progress(callback_url, callback_key, job_id,
+                                 language_detected=detected_lang)
+                # Re-run correction with properly transcribed text
+                _report_progress(callback_url, callback_key, job_id,
+                                 step_name="Correcting lyrics", step_progress=0.9)
+                correction = correct_lyrics(words_list, title=title,
+                                            artist=channel, user_artist=user_artist)
+
             words_list = correction["words"]
             if correction.get("identified_artist"):
                 _report_progress(callback_url, callback_key, job_id,
                                  artist=correction["identified_artist"])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("[%s] Lyrics correction failed: %s", job_id[:20], e)
 
     (output_dir / "lyrics.json").write_text(json.dumps(words_list))
 
@@ -959,12 +994,51 @@ def _retry_undelivered():
             logger.error("Error retrying manifest %s: %s", manifest_path.name, e)
 
 
+def _resume_incomplete_jobs():
+    """On startup, check for incomplete job directories and ask the server to resume."""
+    WORK_DIR.mkdir(parents=True, exist_ok=True)
+    headers = {"X-Worker-Name": WORKER_NAME}
+    if WORKER_API_KEY:
+        headers["Authorization"] = f"Bearer {WORKER_API_KEY}"
+
+    for job_dir in WORK_DIR.iterdir():
+        if not job_dir.is_dir():
+            continue
+        job_id = job_dir.name
+        # Skip if manifest exists (completed but undelivered — handled by _retry_undelivered)
+        if (WORK_DIR / f"{job_id}.manifest.json").exists():
+            continue
+        # Skip if no work subdir (empty or unknown dir)
+        if not (job_dir / "work").exists():
+            continue
+
+        logger.info("Found incomplete job %s — asking server to resume", job_id)
+        try:
+            resp = httpx.post(f"{SERVER_URL}/api/worker/resume",
+                              json={"job_id": job_id},
+                              headers=headers, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("action") == "continue":
+                    job = data["job"]
+                    logger.info("Server approved resume for %s — continuing", job_id)
+                    _execute_job(job)
+                else:
+                    logger.info("Server says abort for %s — cleaning up", job_id)
+                    _cleanup_work_dir(job_dir)
+            else:
+                logger.warning("Resume request failed (%d) for %s", resp.status_code, job_id)
+        except Exception as e:
+            logger.warning("Resume request error for %s: %s", job_id, e)
+
+
 def _run():
-    """Main loop: retry undelivered jobs, then poll for new work."""
+    """Main loop: retry undelivered jobs, resume incomplete, then poll for new work."""
     logger.info("Worker '%s' started (device=%s, server=%s, poll=%ds)",
                 WORKER_NAME, DEVICE, SERVER_URL, POLL_INTERVAL)
 
     _retry_undelivered()
+    _resume_incomplete_jobs()
 
     while True:
         poll = _poll_server()

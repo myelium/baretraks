@@ -451,6 +451,9 @@ async def worker_poll(request: Request):
 
     worker_name = _worker_name_from_request(request)
 
+    # Check for stale processing jobs and reset them
+    _reset_stale_jobs()
+
     # Update worker state (self-registration via polling)
     _worker_states[worker_name] = {
         "status": "idle",
@@ -587,6 +590,7 @@ async def worker_progress(request: Request):
                 if data.get("channel"):
                     item["channel"] = data["channel"]
                 item["status"] = "processing"
+                item["_last_progress_at"] = _now_iso()
                 break
         _save_queue()
 
@@ -652,6 +656,89 @@ async def worker_upload_urls(request: Request):
         if url:
             urls[fname] = url
     return {"urls": urls}
+
+
+@app.post("/api/worker/resume")
+async def worker_resume(request: Request):
+    """Worker asks to resume a previously claimed job after restart."""
+    if not _verify_worker_key(request):
+        raise HTTPException(401, "Invalid worker key")
+    data = await request.json()
+    job_id = data.get("job_id")
+    worker_name = _worker_name_from_request(request)
+    if not job_id:
+        raise HTTPException(400, "job_id required")
+
+    with _lock:
+        for item in _queue:
+            if item.get("id") == job_id:
+                if item.get("status") == "processing":
+                    # Still processing — let the same or new worker continue
+                    item["worker_name"] = worker_name
+                    settings = _load_settings()
+                    callback_url = settings.get("base_url", BASE_URL)
+                    job = {
+                        "job_id": job_id,
+                        "url": item["url"],
+                        "mode": item.get("mode", "karaoke"),
+                        "languages": item.get("languages", []),
+                        "callback_url": callback_url,
+                        "callback_key": WORKER_API_KEY,
+                        "r2_prefix": f"jobs/{job_id}",
+                        "title": item.get("title"),
+                        "channel": item.get("channel"),
+                        "user_artist": item.get("user_artist"),
+                        "settings": {
+                            "feature_lyrics_correction": settings.get("feature_lyrics_correction", True),
+                            "feature_translation": settings.get("feature_translation", True),
+                            "feature_analysis": settings.get("feature_analysis", True),
+                            "analysis_prompt": _load_prompts().get("analysis_prompt", ""),
+                            "demucs_model": settings.get("demucs_model", "htdemucs_ft"),
+                            "max_subtitle_languages": settings.get("max_subtitle_languages", 3),
+                        },
+                    }
+                    logger.info("Worker %s resuming job %s", worker_name, job_id)
+                    return {"action": "continue", "job": job}
+                else:
+                    # Job was cancelled, failed, or re-queued
+                    logger.info("Worker %s tried to resume %s but status is %s",
+                                worker_name, job_id, item.get("status"))
+                    return {"action": "abort"}
+
+    # Job not in queue — already completed or removed
+    return {"action": "abort"}
+
+
+STALE_JOB_TIMEOUT = 300  # 5 minutes with no progress update
+
+
+def _reset_stale_jobs():
+    """Reset processing jobs that haven't received updates in STALE_JOB_TIMEOUT seconds."""
+    now = datetime.now(timezone.utc)
+    changed = False
+    with _lock:
+        for item in _queue:
+            if item.get("status") != "processing":
+                continue
+            dispatched = item.get("dispatched_at", "")
+            last_update = item.get("_last_progress_at", dispatched)
+            if not last_update:
+                continue
+            try:
+                ts = datetime.fromisoformat(last_update)
+                if (now - ts).total_seconds() > STALE_JOB_TIMEOUT:
+                    job_id = item.get("id", "?")
+                    logger.warning("Resetting stale job %s (no update since %s)", job_id, last_update)
+                    item["status"] = "queued"
+                    item.pop("worker_name", None)
+                    item.pop("dispatched_at", None)
+                    item.pop("_last_progress_at", None)
+                    _active_jobs.pop(job_id, None)
+                    changed = True
+            except Exception:
+                pass
+    if changed:
+        _save_queue()
 
 
 # ---------------------------------------------------------------------------
@@ -1049,10 +1136,7 @@ def add_to_queue(req: QueueRequest, user: User | None = Depends(get_optional_use
                  db: Session = Depends(get_db)):
     """Add an item to the production queue."""
     settings = _load_settings()
-    allowed = settings.get("allowed_modes", list(VALID_MODES))
-    mode = req.mode if req.mode in VALID_MODES else "karaoke"
-    if mode not in allowed:
-        raise HTTPException(403, f"Production mode '{mode}' is not enabled")
+    mode = "karaoke"  # unified mode
 
     max_langs = settings.get("max_subtitle_languages", 3)
     languages = req.languages[:max_langs] if req.languages else []
@@ -1069,19 +1153,16 @@ def add_to_queue(req: QueueRequest, user: User | None = Depends(get_optional_use
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         _db = get_session()
         try:
-            today_jobs = _db.query(LibraryItem).filter(
+            today_count = _db.query(LibraryItem).filter(
                 LibraryItem.added_by_id == str(user.id),
                 LibraryItem.status == "done",
                 LibraryItem.finished_at >= today_str,
-            ).all()
-            user_today_karaoke = sum(1 for j in today_jobs if (j.mode or "karaoke") == "karaoke")
-            user_today_subtitled = sum(1 for j in today_jobs if (j.mode or "karaoke") in ("subtitled", "both"))
+            ).count()
         finally:
             _db.close()
-        if mode == "karaoke" and user_today_karaoke >= p.max_karaoke_per_day:
-            raise HTTPException(429, f"Daily karaoke limit reached ({p.max_karaoke_per_day})")
-        if mode in ("subtitled", "both") and user_today_subtitled >= p.max_subtitled_per_day:
-            raise HTTPException(429, f"Daily subtitled limit reached ({p.max_subtitled_per_day})")
+        daily_limit = p.max_karaoke_per_day or 5
+        if today_count >= daily_limit:
+            raise HTTPException(429, f"Daily production limit reached ({daily_limit})")
 
     item_id = f"job-{secrets.token_hex(4)}"
 

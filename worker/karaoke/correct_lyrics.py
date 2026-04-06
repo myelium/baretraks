@@ -105,7 +105,7 @@ def correct_lyrics(words: list[dict], title: str | None = None,
         f"Transcription ({len(texts)} words):\n{transcript}\n\n"
         f"Your response must have exactly two sections.\n\n"
         f"SECTION 1 — First line only:\n"
-        f"SONG: {{song title}} | ARTIST: {{artist/singer name}}\n\n"
+        f"SONG: {{song title}} | ARTIST: {{artist/singer name}} | LANG: {{ISO 639-1 language code of the lyrics, e.g. en, ur, hi, es}}\n\n"
         f"SECTION 2 — Corrected words:\n"
         f"EXACTLY {len(texts)} lines, one word per line, in the same order as the transcription.\n\n"
         f"Rules:\n"
@@ -131,18 +131,23 @@ def correct_lyrics(words: list[dict], title: str | None = None,
         messages=[{"role": "user", "content": prompt}],
     )
 
+    import logging
+    _cl_logger = logging.getLogger(__name__)
+
     raw = response.content[0].text.strip()
     lines = raw.split("\n")
+    _cl_logger.info("Claude response first line: %s", lines[0] if lines else "(empty)")
 
-    # Parse SONG/ARTIST from first line
+    # Parse SONG/ARTIST/LANG from first line
     identified_title = None
     identified_artist = None
+    identified_language = None
     word_lines_start = 0
 
     for i, line in enumerate(lines):
         stripped = line.strip()
         if stripped.startswith("SONG:"):
-            # Parse "SONG: xxx | ARTIST: yyy"
+            # Parse "SONG: xxx | ARTIST: yyy | LANG: zz"
             parts = stripped.split("|")
             for part in parts:
                 part = part.strip()
@@ -150,8 +155,13 @@ def correct_lyrics(words: list[dict], title: str | None = None,
                     identified_title = part[5:].strip()
                 elif part.startswith("ARTIST:"):
                     identified_artist = part[7:].strip()
+                elif part.startswith("LANG:"):
+                    identified_language = part[5:].strip().lower()
             word_lines_start = i + 1
             break
+
+    _cl_logger.info("Parsed: title=%s, artist=%s, lang=%s",
+                    identified_title, identified_artist, identified_language)
 
     # Skip blank lines after the SONG line
     while word_lines_start < len(lines) and not lines[word_lines_start].strip():
@@ -180,4 +190,5 @@ def correct_lyrics(words: list[dict], title: str | None = None,
         "words": result,
         "identified_title": identified_title,
         "identified_artist": identified_artist,
+        "identified_language": identified_language,
     }

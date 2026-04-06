@@ -843,15 +843,17 @@
   }
   .karaoke-overlay .k-word.sung {
     color: #FFD700;
-    -webkit-text-fill-color: #FFD700;
-    background: none !important;
-    -webkit-background-clip: unset !important;
+  }
+  .karaoke-overlay .k-lit {
+    color: #FFD700;
   }
   .karaoke-overlay .k-line-bg {
     display: inline-block;
     background: rgba(0, 0, 0, 0.45);
     border-radius: 6px;
     padding: 4px 16px;
+    direction: auto;
+    unicode-bidi: plaintext;
   }
   .video-container:fullscreen .karaoke-overlay {
     bottom: 40px;
@@ -1045,9 +1047,10 @@
     transition: transform 0.6s cubic-bezier(0.25, 0.1, 0.25, 1);
     will-change: transform;
     padding: 0 0 120px;
+    direction: ltr;
   }
 
-  .lyrics-line { margin-bottom: 8px; transition: opacity 0.4s, transform 0.4s; transform: scale(1); }
+  .lyrics-line { margin-bottom: 8px; transition: opacity 0.4s, transform 0.4s; transform: scale(1); direction: auto; unicode-bidi: plaintext; }
   .lyrics-line.past { opacity: 0.25; }
   .lyrics-line.active-line { transform: scale(1.03); }
 
@@ -3010,7 +3013,10 @@ async function submitQueueForm(url) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!resp.ok) throw new Error('Failed to add to queue');
+    if (!resp.ok) {
+      const errData = await resp.json().catch(() => ({}));
+      throw new Error(errData.detail || 'Failed to add to queue');
+    }
     const data = await resp.json();
     productionQueue = data.queue || [];
     renderQueue();
@@ -4165,6 +4171,9 @@ function switchTab(tab, jobId) {
     _overlayLangs = langs;
     _overlayLangIdx = -1; // -1 = original (karaoke mode)
     _overlayJobId = id;
+    _overlayMode = 'karaoke';
+    _karaokeOverlayOn = true;
+    _translatedCues = [];
     area.innerHTML = `
       <div class="video-container" id="karaoke-video-container">
         <video id="media-el" controls preload="auto" src="/api/jobs/${id}/video" autoplay></video>
@@ -4397,15 +4406,19 @@ function updateKaraokeOverlay(t) {
   }
   if (!activeLine) { overlay.innerHTML = ''; return; }
 
-  // Build word spans with gradient fill
+  // Build word spans with character-level highlighting
   let html = '<span class="k-line-bg">';
   for (const w of activeLine.words) {
     const progress = Math.max(0, Math.min(1, (t - w.start) / Math.max(0.01, w.end - w.start)));
-    const pct = Math.round(progress * 100);
     if (t >= w.end) {
       html += `<span class="k-word sung">${w.text} </span>`;
-    } else if (t >= w.start && pct > 5) {
-      html += `<span class="k-word" style="background:linear-gradient(90deg, #FFD700 ${pct}%, #808080 ${pct}%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;-webkit-text-stroke:0;">${w.text} </span>`;
+    } else if (t >= w.start) {
+      // Split word into highlighted and unhighlighted characters
+      const chars = w.text;
+      const litCount = Math.round(progress * chars.length);
+      const lit = chars.slice(0, litCount);
+      const unlit = chars.slice(litCount);
+      html += `<span class="k-word"><span class="k-lit">${lit}</span>${unlit} </span>`;
     } else {
       html += `<span class="k-word">${w.text} </span>`;
     }
@@ -5560,13 +5573,8 @@ async function loadAdminUsers() {
         <div class="admin-perms" id="admin-perms-${u.id}" style="display:none;padding:10px 12px;background:var(--bg-base);border-top:1px solid var(--border-light);">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:0.75rem;">
             <label style="display:flex;flex-direction:column;gap:2px;color:var(--text-dim);">
-              Max Karaoke/day
+              Max Productions/day
               <input type="number" min="0" value="${p.max_karaoke_per_day ?? 5}" id="perm-karaoke-${u.id}"
-                style="width:100%;padding:4px 8px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:0.8rem;font-family:inherit;" />
-            </label>
-            <label style="display:flex;flex-direction:column;gap:2px;color:var(--text-dim);">
-              Max Subtitled/day
-              <input type="number" min="0" value="${p.max_subtitled_per_day ?? 15}" id="perm-subtitled-${u.id}"
                 style="width:100%;padding:4px 8px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:0.8rem;font-family:inherit;" />
             </label>
             <label style="display:flex;flex-direction:column;gap:2px;color:var(--text-dim);">
@@ -5585,7 +5593,7 @@ async function loadAdminUsers() {
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;font-size:0.75rem;">
             <label style="display:flex;align-items:center;gap:4px;color:var(--text-dim);cursor:pointer;">
-              <input type="checkbox" ${p.can_download_karaoke !== false ? 'checked' : ''} id="perm-dl-karaoke-${u.id}" style="accent-color:var(--accent);" /> Download Karaoke
+              <input type="checkbox" ${p.can_download_karaoke !== false ? 'checked' : ''} id="perm-dl-karaoke-${u.id}" style="accent-color:var(--accent);" /> Download Video
             </label>
             <label style="display:flex;align-items:center;gap:4px;color:var(--text-dim);cursor:pointer;">
               <input type="checkbox" ${p.can_download_instrumental !== false ? 'checked' : ''} id="perm-dl-instr-${u.id}" style="accent-color:var(--accent);" /> Download Instrumental
@@ -5620,7 +5628,6 @@ function toggleAdminPerms(userId) {
 async function saveAdminPerms(userId) {
   const body = {
     max_karaoke_per_day: parseInt(document.getElementById(`perm-karaoke-${userId}`).value) || 0,
-    max_subtitled_per_day: parseInt(document.getElementById(`perm-subtitled-${userId}`).value) || 0,
     max_queue_length: parseInt(document.getElementById(`perm-queue-${userId}`).value) || 0,
     can_download_karaoke: document.getElementById(`perm-dl-karaoke-${userId}`).checked,
     can_download_instrumental: document.getElementById(`perm-dl-instr-${userId}`).checked,
@@ -6022,10 +6029,8 @@ async function loadAdminSettings() {
         </label>
         <p style="font-size:0.7rem;color:var(--text-dim);margin:0 0 12px 0;">Applied when a new User-role account is created.</p>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;">
-          <div><label style="font-size:0.75rem;color:var(--text-dim);">Max Karaoke/day</label>
-            <input type="number" id="set-max-karaoke" value="${s.default_max_karaoke_per_day}" min="0" style="width:100%;padding:4px 8px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:0.85rem;" /></div>
-          <div><label style="font-size:0.75rem;color:var(--text-dim);">Max Subtitled/day</label>
-            <input type="number" id="set-max-subtitled" value="${s.default_max_subtitled_per_day}" min="0" style="width:100%;padding:4px 8px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:0.85rem;" /></div>
+          <div><label style="font-size:0.75rem;color:var(--text-dim);">Max Productions/day</label>
+            <input type="number" id="set-max-karaoke" value="${s.default_max_karaoke_per_day || 5}" min="0" style="width:100%;padding:4px 8px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:0.85rem;" /></div>
           <div><label style="font-size:0.75rem;color:var(--text-dim);">Max Queue Length</label>
             <input type="number" id="set-max-queue" value="${s.default_max_queue_length}" min="1" style="width:100%;padding:4px 8px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:0.85rem;" /></div>
           <div><label style="font-size:0.75rem;color:var(--text-dim);">Max Invitations</label>
@@ -6041,7 +6046,7 @@ async function loadAdminSettings() {
         </label>
         <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px;">
           <label style="font-size:0.8rem;color:var(--text-dim);display:flex;align-items:center;gap:6px;">
-            <input type="checkbox" id="set-def-dl-karaoke" ${s.default_can_download_karaoke !== false ? 'checked' : ''} style="accent-color:var(--accent);" /> Download Karaoke
+            <input type="checkbox" id="set-def-dl-karaoke" ${s.default_can_download_karaoke !== false ? 'checked' : ''} style="accent-color:var(--accent);" /> Download Video
           </label>
           <label style="font-size:0.8rem;color:var(--text-dim);display:flex;align-items:center;gap:6px;">
             <input type="checkbox" id="set-def-dl-instrumental" ${s.default_can_download_instrumental !== false ? 'checked' : ''} style="accent-color:var(--accent);" /> Download Instrumental
@@ -6136,7 +6141,6 @@ async function saveAdminSettings() {
   const status = document.getElementById('admin-settings-status');
   const body = {
     default_max_karaoke_per_day: parseInt(document.getElementById('set-max-karaoke').value) || 5,
-    default_max_subtitled_per_day: parseInt(document.getElementById('set-max-subtitled').value) || 15,
     default_max_queue_length: parseInt(document.getElementById('set-max-queue').value) || 10,
     default_max_invitations: parseInt(document.getElementById('set-max-invitations').value),
     default_can_download_karaoke: document.getElementById('set-def-dl-karaoke').checked,
